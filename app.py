@@ -42,7 +42,7 @@ def main():
         
     print(f"🎯 AI Selected Product ID: {ai_result.get('selected_product_id')}")
     print(f"💡 AI Reason: {ai_result.get('reason')}")
-    print(f"📝 AI Caption: \n{ai_result.get('caption')}")
+    print("📝 AI Captions Generated: [FB, Twitter, LINE]")
     
     # Find the actual product object to get the real link and image
     selected_prod = next((p for p in products if str(p['product_id']) == str(ai_result.get('selected_product_id'))), None)
@@ -56,7 +56,7 @@ def main():
     print("📢 Broadcasting to Social Media...")
     poster = SocialPoster()
     results = poster.post_all(
-        caption=ai_result.get('caption'), 
+        ai_result=ai_result, 
         image_url=selected_prod['image_url'], 
         link=selected_prod['aff_link']
     )

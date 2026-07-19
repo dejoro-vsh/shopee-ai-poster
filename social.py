@@ -1,6 +1,6 @@
 import os
 import requests
-
+import tweepy
 class SocialPoster:
     def __init__(self):
         # API Keys loaded from .env
@@ -9,24 +9,34 @@ class SocialPoster:
         
         self.line_channel_access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
         
-        # Twitter / TikTok / IG variables can go here
+        # Twitter API Keys loaded from .env
+        self.twitter_api_key = os.getenv("TWITTER_API_KEY")
+        self.twitter_api_secret = os.getenv("TWITTER_API_SECRET")
+        self.twitter_access_token = os.getenv("TWITTER_ACCESS_TOKEN")
+        self.twitter_access_token_secret = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
         
-    def post_all(self, caption, image_url, link):
-        """Helper to post to all configured platforms"""
-        final_text = caption.replace("[LINK]", link)
+    def post_all(self, ai_result, image_url, link):
+        """Helper to post to all configured platforms using specific captions"""
+        cap_fb = ai_result.get('caption_facebook', '').replace("[LINK]", link)
+        cap_tw = ai_result.get('caption_twitter', '').replace("[LINK]", link)
+        cap_line = ai_result.get('caption_line', '').replace("[LINK]", link)
         
         results = {}
-        if self.fb_page_id and self.fb_access_token:
-            results['facebook'] = self.post_to_facebook(final_text, image_url)
+        if self.fb_page_id and self.fb_access_token and cap_fb:
+            results['facebook'] = self.post_to_facebook(cap_fb, image_url)
         else:
             results['facebook'] = "Skipped (Missing API Key)"
             
-        if self.line_channel_access_token:
-            results['line'] = self.post_to_line(final_text, image_url)
+        if self.line_channel_access_token and cap_line:
+            results['line'] = self.post_to_line(cap_line, image_url)
         else:
-            results['line'] = "Skipped (Missing API Key)"
+            results['line'] = "Skipped (Missing API Key or Caption)"
             
-        # Add others here
+        if self.twitter_api_key and self.twitter_access_token and cap_tw:
+            results['twitter'] = self.post_to_twitter(cap_tw, image_url)
+        else:
+            results['twitter'] = "Skipped (Missing API Key or Caption)"
+            
         return results
 
     def post_to_facebook(self, message, image_url=None):
@@ -88,9 +98,48 @@ class SocialPoster:
             print("LINE Post Error:", e)
             return "Failed"
             
-    # Stub for future implementations
     def post_to_twitter(self, message, image_url=None):
-        pass
+        """Posts to Twitter using Tweepy (API v2 for text, v1.1 for media)"""
+        print("Posting to Twitter...")
+        try:
+            # V1.1 authentication for media upload
+            auth = tweepy.OAuth1UserHandler(
+                self.twitter_api_key, self.twitter_api_secret,
+                self.twitter_access_token, self.twitter_access_token_secret
+            )
+            api_v1 = tweepy.API(auth)
+            
+            # V2 authentication for tweeting
+            client = tweepy.Client(
+                consumer_key=self.twitter_api_key,
+                consumer_secret=self.twitter_api_secret,
+                access_token=self.twitter_access_token,
+                access_token_secret=self.twitter_access_token_secret
+            )
+            
+            media_ids = []
+            if image_url:
+                # Download image to temp file first because Tweepy v1.1 needs a local file
+                img_data = requests.get(image_url).content
+                with open("temp_tw_img.jpg", "wb") as f:
+                    f.write(img_data)
+                
+                # Upload media using v1.1
+                media = api_v1.media_upload("temp_tw_img.jpg")
+                media_ids = [media.media_id]
+                os.remove("temp_tw_img.jpg")
+            
+            # Post tweet using v2
+            if media_ids:
+                response = client.create_tweet(text=message, media_ids=media_ids)
+            else:
+                response = client.create_tweet(text=message)
+                
+            return f"Success: {response.data['id']}"
+            
+        except Exception as e:
+            print("Twitter Post Error:", e)
+            return "Failed"
         
     def post_to_instagram(self, message, image_url=None):
         # Requires Facebook Graph API (Instagram Business account)
