@@ -17,9 +17,9 @@ def get_todays_products(limit=50):
             today = date.today()
             query = """
                 SELECT 
-                    id, product_id, item_name, price, discount_price, 
-                    commission, image_url, aff_link, category_name
-                FROM products
+                    id, item_id as product_id, title as item_name, price, price as discount_price, 
+                    commission, image_url, affiliate_link as aff_link, shop_name as category_name
+                FROM shopee_products
                 WHERE DATE(created_at) = %s
                 ORDER BY commission DESC
                 LIMIT %s
