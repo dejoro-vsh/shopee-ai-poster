@@ -16,15 +16,38 @@ def get_todays_products(limit=50):
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             today = date.today()
             query = """
-                SELECT 
-                    id, item_id as product_id, title as item_name, price, price as discount_price, 
-                    commission, image_url, affiliate_link as aff_link, shop_name as category_name
-                FROM shopee_products
-                WHERE DATE(created_at) = %s
-                ORDER BY commission DESC
-                LIMIT %s
+                WITH top_comm AS (
+                    SELECT id, item_id as product_id, title as item_name, price, price as discount_price, 
+                           commission, image_url, affiliate_link as aff_link, shop_name as category_name
+                    FROM shopee_products
+                    WHERE DATE(created_at) = %s
+                    ORDER BY commission DESC
+                    LIMIT 20
+                ),
+                cheapest AS (
+                    SELECT id, item_id as product_id, title as item_name, price, price as discount_price, 
+                           commission, image_url, affiliate_link as aff_link, shop_name as category_name
+                    FROM shopee_products
+                    WHERE DATE(created_at) = %s
+                    ORDER BY price ASC
+                    LIMIT 15
+                ),
+                random_items AS (
+                    SELECT id, item_id as product_id, title as item_name, price, price as discount_price, 
+                           commission, image_url, affiliate_link as aff_link, shop_name as category_name
+                    FROM shopee_products
+                    WHERE DATE(created_at) = %s
+                    ORDER BY RANDOM()
+                    LIMIT 15
+                )
+                SELECT * FROM top_comm
+                UNION
+                SELECT * FROM cheapest
+                UNION
+                SELECT * FROM random_items
             """
-            cur.execute(query, (today, limit))
+            # We pass the 'today' parameter 3 times for the 3 CTEs
+            cur.execute(query, (today, today, today))
             products = cur.fetchall()
             return products
     finally:
