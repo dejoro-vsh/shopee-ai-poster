@@ -33,14 +33,14 @@ class SocialPoster:
         """Posts to a Facebook Page using Graph API"""
         print("Posting to Facebook...")
         if image_url:
-            url = f"https://graph.facebook.com/v19.0/{self.fb_page_id}/photos"
+            url = f"https://graph.facebook.com/v25.0/{self.fb_page_id}/photos"
             payload = {
                 "url": image_url,
                 "caption": message,
                 "access_token": self.fb_access_token
             }
         else:
-            url = f"https://graph.facebook.com/v19.0/{self.fb_page_id}/feed"
+            url = f"https://graph.facebook.com/v25.0/{self.fb_page_id}/feed"
             payload = {
                 "message": message,
                 "access_token": self.fb_access_token
