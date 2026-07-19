@@ -29,3 +29,42 @@ def get_todays_products(limit=50):
             return products
     finally:
         conn.close()
+
+def init_db():
+    """Initializes the database schema if it doesn't exist"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS posted_history (
+                    product_id VARCHAR(255) PRIMARY KEY,
+                    posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.commit()
+    finally:
+        conn.close()
+
+def get_posted_product_ids():
+    """Returns a set of all product IDs that have already been posted"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT product_id FROM posted_history")
+            # Return as a set for O(1) lookups
+            return {row[0] for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+def mark_as_posted(product_id):
+    """Saves a product ID to the posted history"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO posted_history (product_id) VALUES (%s) ON CONFLICT (product_id) DO NOTHING",
+                (product_id,)
+            )
+            conn.commit()
+    finally:
+        conn.close()

@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from db import get_todays_products
+from db import get_todays_products, init_db, get_posted_product_ids, mark_as_posted
 from ai import generate_social_content
 from social import SocialPoster
 
@@ -9,16 +9,28 @@ load_dotenv()
 
 def main():
     print("🚀 Starting Shopee AI Poster...")
+    # Initialize DB (create tables if needed)
+    init_db()
     
     # 1. Fetch data from Neon DB
     print("📥 Fetching today's top products from database...")
-    products = get_todays_products(limit=50)
+    all_products = get_todays_products(limit=50)
     
-    if not products:
+    if not all_products:
         print("❌ No products found for today. Make sure the scraper has run.")
         return
         
-    print(f"✅ Found {len(products)} products.")
+    print(f"✅ Found {len(all_products)} products.")
+    
+    # Check memory for already posted products
+    posted_ids = get_posted_product_ids()
+    products = [p for p in all_products if str(p['product_id']) not in posted_ids]
+    
+    if not products:
+        print("✅ All high-commission products today have already been posted. Nothing to do!")
+        return
+        
+    print(f"✅ Found {len(products)} unposted products. Proceeding to AI analysis.")
     
     # 2. Ask Gemini AI to analyze and generate content
     print("🧠 Sending data to Gemini AI for analysis...")
@@ -51,6 +63,13 @@ def main():
     
     print("✅ Finished!")
     print("Results:", results)
+    
+    # If at least one platform succeeded (or if you want to consider any attempt as done)
+    if 'Success' in results.values():
+        print(f"📝 Saving product {selected_prod['product_id']} to memory to prevent duplicate posts.")
+        mark_as_posted(str(selected_prod['product_id']))
+    else:
+        print("⚠️ All posts failed. Product memory not updated so we can retry later.")
 
 if __name__ == "__main__":
     main()
