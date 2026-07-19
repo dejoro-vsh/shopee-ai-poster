@@ -12,8 +12,8 @@ def generate_social_content(products):
         raise ValueError("GEMINI_API_KEY is not set in .env")
     
     genai.configure(api_key=api_key)
-    # Fallback to gemini-pro for maximum compatibility
-    model = genai.GenerativeModel('gemini-pro')
+    # Use 1.5 Flash for speed and cost-effectiveness (free tier is huge)
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
     # Prepare data for AI
     product_summary = []
@@ -34,7 +34,7 @@ def generate_social_content(products):
     3. ความยาวแคปชั่นประมาณ 3-5 บรรทัด กำลังดี
     4. ห้ามใส่ URL ลิงก์ในแคปชั่น (เราจะเติมลิงก์ Affiliate เองในโค้ด) ให้เว้นที่ไว้ว่า [LINK]
     
-    ตอบกลับมาในรูปแบบ JSON เท่านั้น โดยมีโครงสร้างดังนี้ (ห้ามมีข้อความอื่นปน):
+    ตอบกลับมาในรูปแบบ JSON เท่านั้น โดยมีโครงสร้างดังนี้:
     {{
         "selected_product_id": "รหัส ID ของสินค้าที่คุณเลือก",
         "reason": "เหตุผลที่คุณเลือกสินค้านี้สั้นๆ",
@@ -42,12 +42,14 @@ def generate_social_content(products):
     }}
     """
     
-    response = model.generate_content(prompt)
+    generation_config = {
+        "response_mime_type": "application/json",
+    }
+    
+    response = model.generate_content(prompt, generation_config=generation_config)
     
     try:
-        # Clean the response text in case it contains markdown formatting like ```json
-        clean_text = response.text.replace('```json', '').replace('```', '').strip()
-        result = json.loads(clean_text)
+        result = json.loads(response.text)
         return result
     except json.JSONDecodeError:
         print("Error decoding AI response:", response.text)
