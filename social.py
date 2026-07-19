@@ -99,16 +99,9 @@ class SocialPoster:
             return "Failed"
             
     def post_to_twitter(self, message, image_url=None):
-        """Posts to Twitter using Tweepy (API v2 for text, v1.1 for media)"""
+        """Posts to Twitter using Tweepy API v2 (Free Tier)"""
         print("Posting to Twitter...")
         try:
-            # V1.1 authentication for media upload
-            auth = tweepy.OAuth1UserHandler(
-                self.twitter_api_key, self.twitter_api_secret,
-                self.twitter_access_token, self.twitter_access_token_secret
-            )
-            api_v1 = tweepy.API(auth)
-            
             # V2 authentication for tweeting
             client = tweepy.Client(
                 consumer_key=self.twitter_api_key,
@@ -117,23 +110,9 @@ class SocialPoster:
                 access_token_secret=self.twitter_access_token_secret
             )
             
-            media_ids = []
-            if image_url:
-                # Download image to temp file first because Tweepy v1.1 needs a local file
-                img_data = requests.get(image_url).content
-                with open("temp_tw_img.jpg", "wb") as f:
-                    f.write(img_data)
-                
-                # Upload media using v1.1
-                media = api_v1.media_upload("temp_tw_img.jpg")
-                media_ids = [media.media_id]
-                os.remove("temp_tw_img.jpg")
-            
-            # Post tweet using v2
-            if media_ids:
-                response = client.create_tweet(text=message, media_ids=media_ids)
-            else:
-                response = client.create_tweet(text=message)
+            # We skip image_upload (v1.1) because X now charges 402 Payment Required for it.
+            # Twitter will automatically pull the product image from the Shopee Link (Twitter Card)!
+            response = client.create_tweet(text=message)
                 
             return f"Success: {response.data['id']}"
             
