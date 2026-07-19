@@ -12,8 +12,8 @@ def generate_social_content(products):
         raise ValueError("GEMINI_API_KEY is not set in .env")
     
     genai.configure(api_key=api_key)
-    # Use 1.5 Flash for speed and cost-effectiveness (free tier is huge)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # Use 1.5 Flash for speed and cost-effectiveness
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
     
     # Prepare data for AI
     product_summary = []
