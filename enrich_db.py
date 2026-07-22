@@ -19,17 +19,36 @@ def enrich_database():
     print("🔧 กำลังอัปเกรดโครงสร้าง Database...")
     db.init_db()
     
-    print(f"📖 กำลังอ่านข้อมูลจาก {csv_file}...")
+    conn = db.get_db_connection()
+    target_ids = set()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT item_id FROM shopee_products WHERE item_id IS NOT NULL")
+            for row in cur.fetchall():
+                target_ids.add(str(row[0]))
+    except Exception as e:
+        print(f"❌ Database error: {e}")
+        return
+        
+    if not target_ids:
+        print("⚠️ ไม่พบข้อมูลสินค้าเก่าใน Database เลยครับ (ไม่มีรายการให้ไปประกอบร่าง)")
+        return
+        
+    print(f"🎯 มีสินค้าเป้าหมายใน Database ทั้งหมด {len(target_ids)} ชิ้น")
+    print(f"📖 กำลังอ่านข้อมูลจากไฟล์ {csv_file} (อาจใช้เวลาสักครู่สำหรับไฟล์ 1 ล้านบรรทัด)...")
     
     updates = []
     try:
         with open(csv_file, 'r', encoding='utf-8-sig') as f:
-            # ใช้ Generator เพื่อลบตัวอักษร NUL (byte 0) ที่แฝงมากับไฟล์ CSV ของ Shopee
             clean_lines = (line.replace('\0', '') for line in f)
             reader = csv.DictReader(clean_lines)
-            for row in reader:
+            
+            for i, row in enumerate(reader):
+                if i > 0 and i % 100000 == 0:
+                    print(f"  ...อ่านไปแล้ว {i:,} บรรทัด (พบข้อมูลตรงกัน {len(updates)} ชิ้น)")
+                    
                 item_id = row.get('itemid', '').strip()
-                if not item_id:
+                if not item_id or item_id not in target_ids:
                     continue
                 
                 # Parse sales
@@ -48,16 +67,13 @@ def enrich_database():
                 except:
                     pass
                     
-                # Description
                 description = row.get('description', '')
                 
-                # Collect all images
                 all_images = []
                 for key in row.keys():
                     if key and key.startswith('image_link') and row[key]:
                         all_images.append(row[key])
                 
-                # Select the first image as the main image if available
                 main_image = all_images[0] if all_images else None
                 
                 updates.append({
@@ -73,15 +89,17 @@ def enrich_database():
         print(f"❌ เกิดข้อผิดพลาดในการอ่านไฟล์ CSV: {e}")
         return
 
-    print(f"🔄 กำลังอัปเดตข้อมูลเข้า Database (จำนวน {len(updates)} รายการ)...")
+    print(f"🔄 อ่านครบ 1 ล้านบรรทัดแล้ว! สรุปเจอสินค้าที่ตรงกัน {len(updates)} รายการ")
+    if not updates:
+        print("✅ ไม่มีอะไรต้องอัปเดตครับ")
+        return
+        
+    print("🚀 กำลังอัปเดตข้อมูลเข้า Database...")
     
-    conn = db.get_db_connection()
     updated_count = 0
     try:
         with conn.cursor() as cur:
             for item in updates:
-                # Update the row if item_id matches. 
-                # We also update image_url just in case it was missing.
                 cur.execute("""
                     UPDATE shopee_products 
                     SET description = %s,
@@ -106,7 +124,7 @@ def enrich_database():
     finally:
         conn.close()
         
-    print(f"✅ อัปเดตข้อมูลสำเร็จ! สินค้าใน Database ได้รับการอัปเกรดข้อมูลแล้ว {updated_count} รายการ")
+    print(f"✅ อัปเดตข้อมูลสำเร็จ! ประกอบร่างข้อมูลเสร็จสิ้น {updated_count} รายการ")
 
 if __name__ == "__main__":
     from dotenv import load_dotenv
