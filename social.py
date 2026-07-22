@@ -44,27 +44,58 @@ class SocialPoster:
         print("Posting to Facebook...")
         if image_url:
             url = f"https://graph.facebook.com/v25.0/{self.fb_page_id}/photos"
-            payload = {
-                "url": image_url,
-                "caption": message,
-                "access_token": self.fb_access_token
-            }
+            
+            # WORKAROUND: Facebook Graph API cannot download images from Shopee's CDN directly.
+            # We must download it locally first, then upload it as multipart/form-data.
+            try:
+                print(f"  -> Downloading image locally from Shopee...")
+                img_response = requests.get(image_url, stream=True)
+                img_response.raise_for_status()
+                
+                temp_img_path = "temp_fb_image.jpg"
+                with open(temp_img_path, 'wb') as f:
+                    for chunk in img_response.iter_content(1024):
+                        f.write(chunk)
+                
+                print(f"  -> Uploading image to Facebook...")
+                with open(temp_img_path, 'rb') as img_file:
+                    payload = {
+                        "caption": message,
+                        "access_token": self.fb_access_token
+                    }
+                    files = {
+                        "source": img_file
+                    }
+                    response = requests.post(url, data=payload, files=files)
+                
+                # Clean up temp file
+                if os.path.exists(temp_img_path):
+                    os.remove(temp_img_path)
+                    
+                response.raise_for_status()
+                return f"Success: {response.json().get('id')}"
+                
+            except Exception as e:
+                print("Facebook Post Error:", e)
+                if hasattr(e, 'response') and e.response:
+                    try:
+                        print("FB Error Details:", e.response.json())
+                    except:
+                        print("FB Error Details:", e.response.text)
+                return "Failed"
         else:
             url = f"https://graph.facebook.com/v25.0/{self.fb_page_id}/feed"
             payload = {
                 "message": message,
                 "access_token": self.fb_access_token
             }
-            
-        try:
-            response = requests.post(url, data=payload)
-            response.raise_for_status()
-            return f"Success: {response.json().get('id')}"
-        except Exception as e:
-            print("Facebook Post Error:", e)
-            if hasattr(e, 'response') and e.response:
-                print(e.response.text)
-            return "Failed"
+            try:
+                response = requests.post(url, data=payload)
+                response.raise_for_status()
+                return f"Success: {response.json().get('id')}"
+            except Exception as e:
+                print("Facebook Post Error:", e)
+                return "Failed"
 
     def post_to_line(self, message, image_url=None):
         """Broadcasts a message to LINE Official Account"""
