@@ -62,11 +62,18 @@ def main():
     import re
     fallback_slug = "review-" + re.sub(r'[^a-zA-Z0-9]', '-', str(selected_prod['item_name'])).lower()[:30]
     
+    final_slug = ai_result.get("blog_slug")
+    if not final_slug:
+        final_slug = fallback_slug
+        
+    final_title = ai_result.get("blog_title") or selected_prod['item_name']
+    final_content = ai_result.get("blog_content") or f"<p>รีวิวสินค้า {selected_prod['item_name']}</p>"
+    
     blog_url = publisher.publish_single_post(
-        slug=ai_result.get("blog_slug", fallback_slug),
-        title=ai_result.get("blog_title"),
-        content=ai_result.get("blog_content"),
-        excerpt=ai_result.get("blog_excerpt"),
+        slug=final_slug,
+        title=final_title,
+        content=final_content,
+        excerpt=ai_result.get("blog_excerpt", ""),
         image_url=selected_prod['image_url'],
         affiliate_link=selected_prod['aff_link']
     )
