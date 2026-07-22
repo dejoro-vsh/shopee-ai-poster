@@ -29,7 +29,7 @@ def get_todays_products(limit=50):
                            commission, image_url, affiliate_link as aff_link, shop_name as category_name,
                            description, sales, rating, all_images
                     FROM shopee_products
-                    WHERE DATE(created_at) = %s
+                    WHERE DATE(created_at) = %s AND description IS NOT NULL AND description != ''
                     ORDER BY commission DESC
                     LIMIT 20
                 ),
@@ -38,7 +38,7 @@ def get_todays_products(limit=50):
                            commission, image_url, affiliate_link as aff_link, shop_name as category_name,
                            description, sales, rating, all_images
                     FROM shopee_products
-                    WHERE DATE(created_at) = %s
+                    WHERE DATE(created_at) = %s AND description IS NOT NULL AND description != ''
                     ORDER BY price ASC
                     LIMIT 15
                 ),
@@ -47,7 +47,7 @@ def get_todays_products(limit=50):
                            commission, image_url, affiliate_link as aff_link, shop_name as category_name,
                            description, sales, rating, all_images
                     FROM shopee_products
-                    WHERE DATE(created_at) = %s
+                    WHERE DATE(created_at) = %s AND description IS NOT NULL AND description != ''
                     ORDER BY RANDOM()
                     LIMIT 15
                 )
