@@ -43,7 +43,8 @@ class SocialPoster:
         """Posts to a Facebook Page using Graph API"""
         print("Posting to Facebook...")
         if image_url:
-            url = f"https://graph.facebook.com/v25.0/{self.fb_page_id}/photos"
+            # Removed hardcoded v25.0 version to avoid version mismatch errors
+            url = f"https://graph.facebook.com/{self.fb_page_id}/photos"
             
             # WORKAROUND: Facebook Graph API cannot download images from Shopee's CDN directly.
             # We must download it locally first, then upload it as multipart/form-data.
@@ -64,7 +65,8 @@ class SocialPoster:
                         "access_token": self.fb_access_token
                     }
                     files = {
-                        "source": img_file
+                        # Explicitly specify filename and mimetype for requests
+                        "source": ("image.jpg", img_file, "image/jpeg")
                     }
                     response = requests.post(url, data=payload, files=files)
                 
@@ -77,14 +79,15 @@ class SocialPoster:
                 
             except Exception as e:
                 print("Facebook Post Error:", e)
-                if hasattr(e, 'response') and e.response:
+                # Fix response truthiness check (requests response is falsy if status >= 400)
+                if hasattr(e, 'response') and e.response is not None:
                     try:
                         print("FB Error Details:", e.response.json())
                     except:
                         print("FB Error Details:", e.response.text)
                 return "Failed"
         else:
-            url = f"https://graph.facebook.com/v25.0/{self.fb_page_id}/feed"
+            url = f"https://graph.facebook.com/{self.fb_page_id}/feed"
             payload = {
                 "message": message,
                 "access_token": self.fb_access_token
@@ -95,6 +98,11 @@ class SocialPoster:
                 return f"Success: {response.json().get('id')}"
             except Exception as e:
                 print("Facebook Post Error:", e)
+                if hasattr(e, 'response') and e.response is not None:
+                    try:
+                        print("FB Error Details:", e.response.json())
+                    except:
+                        print("FB Error Details:", e.response.text)
                 return "Failed"
 
     def post_to_line(self, message, image_url=None):
