@@ -24,7 +24,9 @@ def enrich_database():
     updates = []
     try:
         with open(csv_file, 'r', encoding='utf-8-sig') as f:
-            reader = csv.DictReader(f)
+            # ใช้ Generator เพื่อลบตัวอักษร NUL (byte 0) ที่แฝงมากับไฟล์ CSV ของ Shopee
+            clean_lines = (line.replace('\0', '') for line in f)
+            reader = csv.DictReader(clean_lines)
             for row in reader:
                 item_id = row.get('itemid', '').strip()
                 if not item_id:
