@@ -41,6 +41,16 @@ def test_csv_import():
             price = parse_price(row.get('ราคา', '0'))
             commission = parse_price(row.get('คอมมิชชัน', row.get('คอมมิชชั่น', '0')))
             
+            sales_str = row.get('ขาย', '')
+            # Parse sales like "1.2พัน" -> 1200, "500" -> 500
+            sales = 0
+            if sales_str:
+                clean_sales = sales_str.replace(',', '').replace('พัน', '00').replace('.', '')
+                try:
+                    sales = int(clean_sales)
+                except:
+                    pass
+            
             # Create a dictionary matching what ai.py expects
             products.append({
                 'product_id': item_id or str(len(products)),
@@ -50,6 +60,7 @@ def test_csv_import():
                 'commission': commission,
                 'category_name': shop_name,
                 'aff_link': aff_link,
+                'sales': sales,
                 'image_url': None
             })
 
@@ -58,11 +69,14 @@ def test_csv_import():
     if len(products) == 0:
         return
 
+    # วิเคราะห์ข้อมูล: เรียงลำดับตามยอดขาย (Sales) จากมากไปน้อย
+    products.sort(key=lambda x: x['sales'], reverse=True)
+
     print("-" * 50)
-    print("🤖 กำลังส่งตัวอย่าง 10 ชิ้นแรกให้ AI ลองวิเคราะห์และเขียนแคปชั่นดู...")
+    print("🤖 กำลังคัดกรองสินค้าที่ 'ขายดีที่สุด' 50 อันดับแรก เพื่อส่งให้ AI วิเคราะห์...")
     
-    # Send up to 10 products to AI to test
-    sample_products = products[:10]
+    # Send Top 50 best-selling products to AI
+    sample_products = products[:50]
     
     ai_result = generate_social_content(sample_products)
     

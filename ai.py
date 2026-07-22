@@ -18,8 +18,9 @@ def generate_social_content(products):
     # Prepare data for AI
     product_summary = []
     for p in products:
+        sales_info = f" | Sales: {p.get('sales', 0)}" if 'sales' in p else ""
         product_summary.append(
-            f"ID: {p['product_id']} | Name: {p['item_name']} | Price: {p['price']} | Discounted: {p['discount_price']} | Commission: {p['commission']} | Category: {p['category_name']}"
+            f"ID: {p['product_id']} | Name: {p['item_name']} | Price: {p['price']} | Commission: {p['commission']}{sales_info} | Category: {p['category_name']}"
         )
     
     prompt = f"""
