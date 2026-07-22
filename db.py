@@ -18,7 +18,8 @@ def get_todays_products(limit=50):
             query = """
                 WITH top_comm AS (
                     SELECT id, item_id as product_id, title as item_name, price, price as discount_price, 
-                           commission, image_url, affiliate_link as aff_link, shop_name as category_name
+                           commission, image_url, affiliate_link as aff_link, shop_name as category_name,
+                           description, sales, rating, all_images
                     FROM shopee_products
                     WHERE DATE(created_at) = %s
                     ORDER BY commission DESC
@@ -26,7 +27,8 @@ def get_todays_products(limit=50):
                 ),
                 cheapest AS (
                     SELECT id, item_id as product_id, title as item_name, price, price as discount_price, 
-                           commission, image_url, affiliate_link as aff_link, shop_name as category_name
+                           commission, image_url, affiliate_link as aff_link, shop_name as category_name,
+                           description, sales, rating, all_images
                     FROM shopee_products
                     WHERE DATE(created_at) = %s
                     ORDER BY price ASC
@@ -34,7 +36,8 @@ def get_todays_products(limit=50):
                 ),
                 random_items AS (
                     SELECT id, item_id as product_id, title as item_name, price, price as discount_price, 
-                           commission, image_url, affiliate_link as aff_link, shop_name as category_name
+                           commission, image_url, affiliate_link as aff_link, shop_name as category_name,
+                           description, sales, rating, all_images
                     FROM shopee_products
                     WHERE DATE(created_at) = %s
                     ORDER BY RANDOM()
@@ -58,12 +61,40 @@ def init_db():
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
+            # Create posted_history
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS posted_history (
                     product_id VARCHAR(255) PRIMARY KEY,
                     posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Create shopee_products if it doesn't exist (basic schema)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS shopee_products (
+                    id SERIAL PRIMARY KEY,
+                    item_id VARCHAR(255) UNIQUE,
+                    title TEXT,
+                    price DECIMAL(10,2),
+                    commission DECIMAL(10,2),
+                    image_url TEXT,
+                    affiliate_link TEXT,
+                    shop_name VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # Alter table to add rich data columns if they don't exist
+            alter_statements = [
+                "ALTER TABLE shopee_products ADD COLUMN IF NOT EXISTS description TEXT;",
+                "ALTER TABLE shopee_products ADD COLUMN IF NOT EXISTS sales INTEGER DEFAULT 0;",
+                "ALTER TABLE shopee_products ADD COLUMN IF NOT EXISTS rating FLOAT DEFAULT 0.0;",
+                "ALTER TABLE shopee_products ADD COLUMN IF NOT EXISTS all_images JSONB;"
+            ]
+            for stmt in alter_statements:
+                try:
+                    cur.execute(stmt)
+                except Exception as e:
+                    print(f"Notice: {e}")
+            
             conn.commit()
     finally:
         conn.close()
