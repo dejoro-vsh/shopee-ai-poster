@@ -52,13 +52,33 @@ def main():
         print("⚠️ AI selected an ID that doesn't exist. Falling back to the highest commission product.")
         selected_prod = products[0]
         
-    # 3. Post to Social Media
+    from publisher import BlogPublisher
+    
+    # 3. Publish to Blog First
+    print("📝 Publishing article to review.bizxthai.com...")
+    publisher = BlogPublisher()
+    blog_url = publisher.publish_single_post(
+        title=ai_result.get("blog_title"),
+        content=ai_result.get("blog_content"),
+        excerpt=ai_result.get("blog_excerpt"),
+        image_url=selected_prod['image_url'],
+        affiliate_link=selected_prod['aff_link']
+    )
+    
+    if not blog_url:
+        print("⚠️ Failed to publish blog. Falling back to direct affiliate link for social.")
+        social_link = selected_prod['aff_link']
+    else:
+        print(f"✅ Blog published! URL: {blog_url}")
+        social_link = blog_url
+        
+    # 4. Post to Social Media
     print("📢 Broadcasting to Social Media...")
     poster = SocialPoster()
     results = poster.post_all(
         ai_result=ai_result, 
         image_url=selected_prod['image_url'], 
-        link=selected_prod['aff_link']
+        link=social_link
     )
     
     print("✅ Finished!")
