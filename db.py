@@ -10,11 +10,19 @@ def get_db_connection():
     return psycopg2.connect(db_url)
 
 def get_todays_products(limit=50):
-    """Fetches the latest products added today, ordered by highest commission"""
+    """Fetches top products from the database for the latest available date"""
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            today = date.today()
+            # Find the most recent date we have data for
+            cur.execute("SELECT MAX(DATE(created_at)) FROM shopee_products")
+            latest_date_result = cur.fetchone()
+            
+            if not latest_date_result or not latest_date_result['max']:
+                return []
+                
+            latest_date = latest_date_result['max']
+            
             query = """
                 WITH top_comm AS (
                     SELECT id, item_id as product_id, title as item_name, price, price as discount_price, 
@@ -49,10 +57,15 @@ def get_todays_products(limit=50):
                 UNION
                 SELECT * FROM random_items
             """
-            # We pass the 'today' parameter 3 times for the 3 CTEs
-            cur.execute(query, (today, today, today))
+            cur.execute(query, (latest_date, latest_date, latest_date))
+            
+            # Sort the combined results by commission descending
             products = cur.fetchall()
-            return products
+            products.sort(key=lambda x: (x.get('sales') or 0, x.get('commission') or 0), reverse=True)
+            return products[:limit]
+    except Exception as e:
+        print(f"Error fetching products: {e}")
+        return []
     finally:
         conn.close()
 
