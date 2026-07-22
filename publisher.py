@@ -6,8 +6,9 @@ class BlogPublisher:
     def __init__(self):
         self.api_url = VERCEL_API_URL
 
-    def publish_single_post(self, title, content, excerpt, image_url, affiliate_link):
+    def publish_single_post(self, slug, title, content, excerpt, image_url, affiliate_link):
         payload = {
+            "slug": slug,
             "title": title,
             "content": content,
             "excerpt": excerpt,

@@ -57,7 +57,13 @@ def main():
     # 3. Publish to Blog First
     print("📝 Publishing article to review.bizxthai.com...")
     publisher = BlogPublisher()
+    
+    # Generate a fallback slug just in case AI didn't provide one
+    import re
+    fallback_slug = "review-" + re.sub(r'[^a-zA-Z0-9]', '-', str(selected_prod['item_name'])).lower()[:30]
+    
     blog_url = publisher.publish_single_post(
+        slug=ai_result.get("blog_slug", fallback_slug),
         title=ai_result.get("blog_title"),
         content=ai_result.get("blog_content"),
         excerpt=ai_result.get("blog_excerpt"),
