@@ -19,8 +19,8 @@ def generate_social_content(products):
     product_summary = []
     for p in products:
         sales_info = f" | ยอดขาย: {p.get('sales', 0)} ชิ้น" if 'sales' in p else ""
-        rating_info = f" | รีวิว: {p.get('rating', 0.0)} ดาว" if 'rating' in p and p.get('rating', 0) > 0 else ""
-        desc = p.get('description', '')
+        rating_info = f" | รีวิว: {p.get('rating', 0.0)} ดาว" if 'rating' in p and p.get('rating') and float(p.get('rating')) > 0 else ""
+        desc = p.get('description') or ''
         short_desc = desc[:300] + "..." if len(desc) > 300 else desc # limit length to save tokens
         
         product_summary.append(
