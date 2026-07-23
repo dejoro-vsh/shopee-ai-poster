@@ -1,7 +1,8 @@
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 from db import get_todays_products, init_db, get_posted_product_ids, mark_as_posted
-from ai import generate_social_content
+from ai import generate_social_content, generate_trend_content
 from social import SocialPoster
 
 # Load environment variables
@@ -30,57 +31,90 @@ def main():
         print("✅ All high-commission products today have already been posted. Nothing to do!")
         return
         
-    print(f"✅ Found {len(products)} unposted products. Proceeding to AI analysis.")
+    print(f"✅ Found {len(products)} unposted products.")
     
-    # 2. Ask Gemini AI to analyze and generate content
-    print("🧠 Sending data to Gemini AI for analysis...")
-    ai_result = generate_social_content(products)
+    current_hour = datetime.now().hour
+    # Strategy: 
+    # 10:00 - 16:59 -> Knowledge/Tips/Trends
+    # Other times -> Normal Product Review
+    is_knowledge_time = 10 <= current_hour < 17
+    
+    if is_knowledge_time:
+        print(f"⏰ Current hour is {current_hour}. Proceeding to AI KNOWLEDGE/TREND analysis.")
+        ai_result = generate_trend_content(products)
+    else:
+        print(f"⏰ Current hour is {current_hour}. Proceeding to AI PRODUCT REVIEW analysis.")
+        ai_result = generate_social_content(products)
     
     if not ai_result:
         print("❌ Failed to get a response from AI.")
         return
         
-    print(f"🎯 AI Selected Product ID: {ai_result.get('selected_product_id')}")
-    print(f"💡 AI Reason: {ai_result.get('reason')}")
+    if is_knowledge_time:
+        print(f"🎯 AI Generated Trend Article: {ai_result.get('blog_title')}")
+        selected_prod = None
+    else:
+        print(f"🎯 AI Selected Product ID: {ai_result.get('selected_product_id')}")
+        print(f"💡 AI Reason: {ai_result.get('reason')}")
+        selected_prod = next((p for p in products if str(p['product_id']) == str(ai_result.get('selected_product_id'))), None)
+        if not selected_prod:
+            print("⚠️ AI selected an ID that doesn't exist. Falling back to the highest commission product.")
+            selected_prod = products[0]
+            
     print("📝 AI Captions Generated: [FB, Twitter, LINE]")
     
-    # Find the actual product object to get the real link and image
-    selected_prod = next((p for p in products if str(p['product_id']) == str(ai_result.get('selected_product_id'))), None)
-    
-    if not selected_prod:
-        # Fallback if AI hallucinates an ID, just pick the first one
-        print("⚠️ AI selected an ID that doesn't exist. Falling back to the highest commission product.")
-        selected_prod = products[0]
-        
     from publisher import BlogPublisher
     
     # 3. Publish to Blog First
     print("📝 Publishing article to review.bizxthai.com...")
     publisher = BlogPublisher()
     
-    # Generate a fallback slug just in case AI didn't provide one
     import re
-    fallback_slug = "review-" + re.sub(r'[^a-zA-Z0-9]', '-', str(selected_prod['item_name'])).lower()[:30]
+    if is_knowledge_time:
+        fallback_slug = "trend-" + datetime.now().strftime("%Y%m%d%H%M")
+    else:
+        fallback_slug = "review-" + re.sub(r'[^a-zA-Z0-9]', '-', str(selected_prod['item_name'])).lower()[:30]
     
     final_slug = ai_result.get("blog_slug")
     if not final_slug:
         final_slug = fallback_slug
         
-    final_title = ai_result.get("blog_title") or selected_prod['item_name']
-    final_content = ai_result.get("blog_content") or f"<p>รีวิวสินค้า {selected_prod['item_name']}</p>"
-    
-    blog_url = publisher.publish_single_post(
-        slug=final_slug,
-        title=final_title,
-        content=final_content,
-        excerpt=ai_result.get("blog_excerpt", ""),
-        image_url=selected_prod['image_url'],
-        affiliate_link=selected_prod['aff_link']
-    )
+    if is_knowledge_time:
+        final_title = ai_result.get("blog_title")
+        final_content = ai_result.get("blog_content")
+        # Ensure we pass an empty affiliate link for trends
+        blog_url = publisher.publish_single_post(
+            slug=final_slug,
+            category=ai_result.get("category", "อื่นๆ"),
+            title=final_title,
+            content=final_content,
+            excerpt=ai_result.get("blog_excerpt", ""),
+            image_url="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80",
+            affiliate_link=""
+        )
+        social_image = "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80"
+    else:
+        final_title = ai_result.get("blog_title") or selected_prod['item_name']
+        final_content = ai_result.get("blog_content") or f"<p>รีวิวสินค้า {selected_prod['item_name']}</p>"
+        
+        blog_url = publisher.publish_single_post(
+            slug=final_slug,
+            category=ai_result.get("category", "อื่นๆ"),
+            title=final_title,
+            content=final_content,
+            excerpt=ai_result.get("blog_excerpt", ""),
+            image_url=selected_prod['image_url'],
+            affiliate_link=selected_prod['aff_link']
+        )
+        social_image = selected_prod['image_url']
     
     if not blog_url:
-        print("⚠️ Failed to publish blog. Falling back to direct affiliate link for social.")
-        social_link = selected_prod['aff_link']
+        print("⚠️ Failed to publish blog.")
+        if not is_knowledge_time:
+            print("Falling back to direct affiliate link for social.")
+            social_link = selected_prod['aff_link']
+        else:
+            social_link = "https://review.bizxthai.com"
     else:
         print(f"✅ Blog published! URL: {blog_url}")
         social_link = blog_url
@@ -90,19 +124,22 @@ def main():
     poster = SocialPoster()
     results = poster.post_all(
         ai_result=ai_result, 
-        image_url=selected_prod['image_url'], 
+        image_url=social_image, 
         link=social_link
     )
     
     print("✅ Finished!")
     print("Results:", results)
     
-    # If at least one platform succeeded (or if you want to consider any attempt as done)
+    # If at least one platform succeeded
     if 'Success' in results.values():
-        print(f"📝 Saving product {selected_prod['product_id']} to memory to prevent duplicate posts.")
-        mark_as_posted(str(selected_prod['product_id']))
+        if not is_knowledge_time and selected_prod:
+            print(f"📝 Saving product {selected_prod['product_id']} to memory to prevent duplicate posts.")
+            mark_as_posted(str(selected_prod['product_id']))
+        else:
+            print("📝 Knowledge trend post completed successfully.")
     else:
-        print("⚠️ All posts failed. Product memory not updated so we can retry later.")
+        print("⚠️ All posts failed.")
 
 if __name__ == "__main__":
     main()

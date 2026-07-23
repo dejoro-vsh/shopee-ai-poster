@@ -6,9 +6,10 @@ class BlogPublisher:
     def __init__(self):
         self.api_url = VERCEL_API_URL
 
-    def publish_single_post(self, slug, title, content, excerpt, image_url, affiliate_link):
+    def publish_single_post(self, slug, category, title, content, excerpt, image_url, affiliate_link):
         payload = {
             "slug": slug,
+            "category": category,
             "title": title,
             "content": content,
             "excerpt": excerpt,
@@ -16,6 +17,9 @@ class BlogPublisher:
             "affiliate_link": affiliate_link,
             "type": "single"
         }
+        
+        print("DEBUG PAYLOAD:")
+        print(payload)
         
         try:
             response = requests.post(self.api_url, json=payload, timeout=30)
