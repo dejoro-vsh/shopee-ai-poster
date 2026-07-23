@@ -82,6 +82,10 @@ def main():
     if is_knowledge_time:
         final_title = ai_result.get("blog_title")
         final_content = ai_result.get("blog_content")
+        
+        # Use the image of the first product in the list as the cover for the trend
+        trend_image = products[0]['image_url'] if products else "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80"
+        
         # Ensure we pass an empty affiliate link for trends
         blog_url = publisher.publish_single_post(
             slug=final_slug,
@@ -89,10 +93,10 @@ def main():
             title=final_title,
             content=final_content,
             excerpt=ai_result.get("blog_excerpt", ""),
-            image_url="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80",
+            image_url=trend_image,
             affiliate_link=""
         )
-        social_image = "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80"
+        social_image = trend_image
     else:
         final_title = ai_result.get("blog_title") or selected_prod['item_name']
         final_content = ai_result.get("blog_content") or f"<p>รีวิวสินค้า {selected_prod['item_name']}</p>"
