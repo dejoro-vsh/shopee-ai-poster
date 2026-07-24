@@ -82,10 +82,11 @@ def main():
     if is_knowledge_time:
         final_title = ai_result.get("blog_title")
         final_content = ai_result.get("blog_content")
-        
-        # Use the image of the first product in the list as the cover for the trend
-        trend_image = products[0]['image_url'] if products else "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80"
-        
+        # Use pollinations.ai for a dynamic AI-generated image based on the AI's prompt
+        import urllib.parse
+        image_prompt = ai_result.get("blog_image_prompt", "latest technology trends in 2024")
+        encoded_prompt = urllib.parse.quote(image_prompt)
+        trend_image = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=600&nologo=true"
         # Ensure we pass an empty affiliate link for trends
         blog_url = publisher.publish_single_post(
             slug=final_slug,
