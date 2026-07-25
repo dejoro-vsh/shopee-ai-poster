@@ -92,7 +92,7 @@ def main():
         import random
         encoded_prompt = urllib.parse.quote(image_prompt)
         seed = random.randint(1, 100000)
-        trend_image = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=600&nologo=true&seed={seed}"
+        trend_image = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=600&seed={seed}"
         
         # Check if the generated image URL is valid and loads correctly
         try:
