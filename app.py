@@ -84,9 +84,25 @@ def main():
         final_content = ai_result.get("blog_content")
         # Use pollinations.ai for a dynamic AI-generated image based on the AI's prompt
         import urllib.parse
+        import requests
         image_prompt = ai_result.get("blog_image_prompt", "latest technology trends in 2024")
+        
+        # In case the prompt is in Thai, translating it or just using a safe fallback might be needed,
+        # but let's URL encode it and see if it works. We will validate it first!
         encoded_prompt = urllib.parse.quote(image_prompt)
         trend_image = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=600&nologo=true"
+        
+        # Check if the generated image URL is valid and loads correctly
+        try:
+            print(f"Validating AI image URL: {trend_image}")
+            img_res = requests.get(trend_image, timeout=15)
+            if img_res.status_code != 200 or 'image' not in img_res.headers.get('content-type', ''):
+                print("❌ AI image validation failed, falling back to safe generic image")
+                trend_image = "https://images.unsplash.com/photo-1518770660439-4636190af475?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80"
+        except Exception as e:
+            print(f"❌ Error validating AI image: {e}")
+            trend_image = "https://images.unsplash.com/photo-1518770660439-4636190af475?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80"
+
         # Ensure we pass an empty affiliate link for trends
         blog_url = publisher.publish_single_post(
             slug=final_slug,
