@@ -89,8 +89,10 @@ def main():
         
         # In case the prompt is in Thai, translating it or just using a safe fallback might be needed,
         # but let's URL encode it and see if it works. We will validate it first!
+        import random
         encoded_prompt = urllib.parse.quote(image_prompt)
-        trend_image = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=600&nologo=true"
+        seed = random.randint(1, 100000)
+        trend_image = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=800&height=600&nologo=true&seed={seed}"
         
         # Check if the generated image URL is valid and loads correctly
         try:
