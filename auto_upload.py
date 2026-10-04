@@ -6,9 +6,11 @@ import csv
 import json
 import requests
 import traceback
+import subprocess
 
 DOWNLOADS_PATH = os.path.expanduser('~/Downloads')
 API_URL = 'https://shopee-scraper-vercel.vercel.app/api/products'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def parse_price(price_str):
     if not price_str: return 0.0
@@ -21,7 +23,6 @@ def try_read_csv(file_path):
     for enc in encodings_to_try:
         try:
             with open(file_path, 'r', encoding=enc) as f:
-                # We will read as simple arrays to bypass ANY header naming/unicode issues!
                 reader = csv.reader(f)
                 rows = list(reader)
                 if len(rows) > 1 and len(rows[0]) > 5:
@@ -43,9 +44,7 @@ def process_csv_and_upload(file_path):
         
     products = []
     headers = [clean_str(h) for h in rows[0]]
-    print(f"?? ??????????: {headers}", flush=True)
     
-    # Try to find indexes
     def find_idx(possible_names):
         for i, h in enumerate(headers):
             for p in possible_names:
@@ -62,18 +61,8 @@ def process_csv_and_upload(file_path):
     idx_link = find_idx(['???????????', 'ProductLink'])
     idx_aff = find_idx(['????????????', 'AffiliateLink'])
     
-    # FALLBACK to strict Shopee format if headers are completely unreadable
     if idx_title == -1 or idx_aff == -1:
-        print("?? ???????????????????? (???????????) ?????????????????????????????? Shopee ???...", flush=True)
-        idx_id = 0
-        idx_title = 1
-        idx_price = 2
-        idx_sales = 3
-        idx_shop = 4
-        idx_comm_rate = 5
-        idx_comm = 6
-        idx_link = 7
-        idx_aff = 8
+        idx_id, idx_title, idx_price, idx_sales, idx_shop, idx_comm_rate, idx_comm, idx_link, idx_aff = 0, 1, 2, 3, 4, 5, 6, 7, 8
         
     for i in range(1, len(rows)):
         row = rows[i]
@@ -121,6 +110,16 @@ def process_csv_and_upload(file_path):
         res = requests.post(API_URL, json=products[:50], headers={'Content-Type': 'application/json'}, timeout=20)
         if res.status_code in [200, 201]:
             print('?? ??????! ?????????????? Database ?????????', flush=True)
+            
+            # AUTOMATION: Trigger enrich_db.py automatically!
+            print('?? ??????? enrich_db.py ????????? ??????????????...', flush=True)
+            enrich_path = os.path.join(BASE_DIR, 'enrich_db.py')
+            if os.path.exists(enrich_path):
+                subprocess.Popen(['python3', enrich_path], cwd=BASE_DIR)
+                print('? ????????????????????????????????????????????!', flush=True)
+            else:
+                print('?? ????????? enrich_db.py ??????????', flush=True)
+                
             return True
         else:
             print(f'? ?????????????????????: {res.status_code} {res.text}', flush=True)
