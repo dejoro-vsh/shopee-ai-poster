@@ -21,9 +21,10 @@ def try_read_csv(file_path):
     for enc in encodings_to_try:
         try:
             with open(file_path, 'r', encoding=enc) as f:
-                reader = csv.DictReader(f)
+                # We will read as simple arrays to bypass ANY header naming/unicode issues!
+                reader = csv.reader(f)
                 rows = list(reader)
-                if len(rows) > 0 and len(rows[0].keys()) > 1:
+                if len(rows) > 1 and len(rows[0]) > 5:
                     print(f"?? ????????????????: {enc} ??????! (?? {len(rows)} ??????)", flush=True)
                     return rows
         except Exception as e:
@@ -34,15 +35,6 @@ def clean_str(s):
     if not isinstance(s, str): return s
     return s.strip('\ufeff \t\"\'\n\r')
 
-def find_val(row_dict, possible_keys):
-    for k, v in row_dict.items():
-        if k is None: continue
-        clean_k = clean_str(k).replace(' ', '')
-        for pk in possible_keys:
-            if pk.replace(' ', '') in clean_k:
-                return clean_str(v)
-    return ''
-
 def process_csv_and_upload(file_path):
     print(f'\n? ?????????????: {file_path}', flush=True)
     rows = try_read_csv(file_path)
@@ -50,29 +42,57 @@ def process_csv_and_upload(file_path):
         return False
         
     products = []
+    headers = [clean_str(h) for h in rows[0]]
+    print(f"?? ??????????: {headers}", flush=True)
     
-    # Strip whitespace, BOM, and quotes from keys and values
-    cleaned_rows = []
-    for r in rows:
-        cleaned_rows.append({clean_str(k): clean_str(v) for k, v in r.items() if k is not None})
+    # Try to find indexes
+    def find_idx(possible_names):
+        for i, h in enumerate(headers):
+            for p in possible_names:
+                if p in h.replace(' ', ''): return i
+        return -1
         
-    print(f"?? ????????????????????: {cleaned_rows[0]}", flush=True)
+    idx_id = find_idx(['??????????', 'ItemID'])
+    idx_title = find_idx(['??????????', 'ProductName', 'ItemName'])
+    idx_price = find_idx(['????', 'Price'])
+    idx_sales = find_idx(['???', '??????'])
+    idx_shop = find_idx(['???????????', 'ShopName'])
+    idx_comm_rate = find_idx(['?????????????????', '???????????????', 'CommissionRate'])
+    idx_comm = find_idx(['?????????', '??????????', 'Commission'])
+    idx_link = find_idx(['???????????', 'ProductLink'])
+    idx_aff = find_idx(['????????????', 'AffiliateLink'])
+    
+    # FALLBACK to strict Shopee format if headers are completely unreadable
+    if idx_title == -1 or idx_aff == -1:
+        print("?? ???????????????????? (???????????) ?????????????????????????????? Shopee ???...", flush=True)
+        idx_id = 0
+        idx_title = 1
+        idx_price = 2
+        idx_sales = 3
+        idx_shop = 4
+        idx_comm_rate = 5
+        idx_comm = 6
+        idx_link = 7
+        idx_aff = 8
         
-    for row in cleaned_rows:
-        title = find_val(row, ['??????????', 'ProductName', 'ItemName'])
-        affiliateLink = find_val(row, ['????????????', 'AffiliateLink'])
+    for i in range(1, len(rows)):
+        row = rows[i]
+        if len(row) <= max(idx_title, idx_aff): continue
+        
+        title = clean_str(row[idx_title])
+        affiliateLink = clean_str(row[idx_aff])
         
         if not title or not affiliateLink:
             continue
             
-        originalLink = find_val(row, ['???????????', 'ProductLink']) or affiliateLink
-        itemid = find_val(row, ['??????????', 'ItemID']) or None
-        sales = find_val(row, ['???', '??????'])
-        shopName = find_val(row, ['???????????', 'ShopName'])
-        commissionRate = find_val(row, ['?????????????????', '???????????????', 'CommissionRate'])
+        originalLink = clean_str(row[idx_link]) if idx_link != -1 and len(row) > idx_link else affiliateLink
+        itemid = clean_str(row[idx_id]) if idx_id != -1 and len(row) > idx_id else None
+        sales = clean_str(row[idx_sales]) if idx_sales != -1 and len(row) > idx_sales else ''
+        shopName = clean_str(row[idx_shop]) if idx_shop != -1 and len(row) > idx_shop else ''
+        commissionRate = clean_str(row[idx_comm_rate]) if idx_comm_rate != -1 and len(row) > idx_comm_rate else ''
         
-        commissionStr = find_val(row, ['?????????', '??????????', 'Commission']) or '0'
-        priceStr = find_val(row, ['????', 'Price']) or '0'
+        commissionStr = clean_str(row[idx_comm]) if idx_comm != -1 and len(row) > idx_comm else '0'
+        priceStr = clean_str(row[idx_price]) if idx_price != -1 and len(row) > idx_price else '0'
         
         if not itemid and originalLink:
             parts = str(originalLink).split('.')
@@ -92,13 +112,13 @@ def process_csv_and_upload(file_path):
         })
         
     if not products:
-        print('? ????????????????? (??????????????? ??????????????)', flush=True)
+        print('? ????????????????? (??????????????????????????)', flush=True)
         return False
         
     print(f'? ???????? {len(products)} ?????? ?????????????????????????????...', flush=True)
     
     try:
-        res = requests.post(API_URL, json=products, headers={'Content-Type': 'application/json'}, timeout=20)
+        res = requests.post(API_URL, json=products[:50], headers={'Content-Type': 'application/json'}, timeout=20)
         if res.status_code in [200, 201]:
             print('?? ??????! ?????????????? Database ?????????', flush=True)
             return True
