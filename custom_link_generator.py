@@ -121,7 +121,17 @@ def convert_via_playwright(product_url, headless=False):
                 except Exception as e:
                     print(f"Notice: {e}")
             
-        page = context.new_page() if is_cdp else context.pages[0] if context.pages else context.new_page()
+        target_page = None
+        if is_cdp:
+            for pg in context.pages:
+                if "custom_link" in pg.url or "affiliate.shopee" in pg.url:
+                    target_page = pg
+                    print(f"🎯 พบแท็บ Shopee Affiliate ที่เปิดอยู่แล้วใน Chrome: {target_page.url}")
+                    break
+        if not target_page:
+            target_page = context.new_page() if is_cdp else (context.pages[0] if context.pages else context.new_page())
+            
+        page = target_page
         page.set_default_timeout(30000)
         
         captured_shortlinks = []
@@ -142,9 +152,13 @@ def convert_via_playwright(product_url, headless=False):
         page.on("response", handle_response)
 
         try:
-            print("⏳ กำลังเปิดหน้าสร้างลิงก์ Shopee...")
-            page.goto(AFFILIATE_CUSTOM_LINK_URL, wait_until="domcontentloaded", timeout=25000)
-            time.sleep(2)
+            if AFFILIATE_CUSTOM_LINK_URL not in page.url:
+                print("⏳ กำลังเปิดหน้าสร้างลิงก์ Shopee...")
+                page.goto(AFFILIATE_CUSTOM_LINK_URL, wait_until="domcontentloaded", timeout=25000)
+                time.sleep(2)
+            else:
+                print("⚡ ใช้แท็บ Shopee Affiliate ที่เปิดค้างอยู่บนจอได้ทันที!")
+                time.sleep(1)
             
             # ตรวจสอบว่าติดหน้า Anti-bot / Captcha หรือไม่
             current_url = page.url
