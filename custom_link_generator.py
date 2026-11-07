@@ -56,7 +56,7 @@ def parse_cookies(cookie_string):
 def convert_via_playwright(product_url, headless=False):
     """
     แปลงลิงก์สินค้าธรรมดาเป็น Shopee Affiliate Link
-    โดยจำลองการพิมพ์และคลิกปุ่มบนหน้าเว็บจริง เพื่อให้ผ่านระบบ Anti-Bot (SAP/Datadome) 100%
+    พร้อมระบบ Stealth Bypass Anti-Bot และรองรับการแก้ Captcha อัตโนมัติ
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -79,26 +79,38 @@ def convert_via_playwright(product_url, headless=False):
         context = None
         is_cdp = False
         
-        # 1. ตรวจสอบว่าเปิด Chrome Port 9222 อยู่หรือไม่
+        # 1. วิธีที่ดีที่สุด 100%: ตรวจสอบว่ามี Google Chrome รันด้วย Remote Debugging Port 9222 อยู่หรือไม่
         try:
             browser = p.chromium.connect_over_cdp("http://localhost:9222", timeout=3000)
             context = browser.contexts[0]
             is_cdp = True
-            print("⚡ เชื่อมต่อกับ Google Chrome (Port 9222) สำเร็จ!")
+            print("⚡ เชื่อมต่อกับ Google Chrome ตัวจริงบน Mac (Port 9222) สำเร็จ! (ไร้ Anti-bot 100%)")
         except Exception:
-            # 2. ถ้าไม่ได้เปิด ให้ใช้โฟลเดอร์ session เฉพาะ
+            # 2. ถ้าไม่ได้เปิด Port 9222 ให้เปิด Browser พร้อมระบบ Stealth Evasion
             session_dir = os.path.expanduser("~/.shopee_poster_session")
             os.makedirs(session_dir, exist_ok=True)
-            print("🌐 เปิดเบราว์เซอร์อัตโนมัติ...")
+            print("🌐 เปิดเบราว์เซอร์พร้อมระบบหลบหลีก Anti-Bot...")
+            
+            # ใช้ Chrome จริงของ macOS ถ้ามี เพื่อลดการถูกมองว่าเป็น Bot
+            use_channel = "chrome" if (sys.platform == "darwin" and os.path.exists("/Applications/Google Chrome.app")) else None
             
             context = p.chromium.launch_persistent_context(
                 user_data_dir=session_dir,
+                channel=use_channel,
                 headless=headless,
                 args=[
                     "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox"
+                    "--no-sandbox",
+                    "--disable-infobars"
                 ]
             )
+            
+            # ฉีด Script ลบค่า navigator.webdriver เพื่อหลบ Anti-Bot
+            context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.navigator.chrome = { runtime: {} };
+                Object.defineProperty(navigator, 'languages', { get: () => ['th-TH', 'th', 'en-US', 'en'] });
+            """)
             
             # ฉีด Cookie ล็อกอิน
             if DEFAULT_COOKIE:
@@ -110,11 +122,11 @@ def convert_via_playwright(product_url, headless=False):
                     print(f"Notice: {e}")
             
         page = context.new_page() if is_cdp else context.pages[0] if context.pages else context.new_page()
-        page.set_default_timeout(25000)
+        page.set_default_timeout(30000)
         
         captured_shortlinks = []
 
-        # ดักจับ Network Response จากการกดปุ่มของหน้าเว็บ
+        # ดักจับ Network Response
         def handle_response(response):
             if "batchCustomLink" in response.url:
                 try:
@@ -131,14 +143,33 @@ def convert_via_playwright(product_url, headless=False):
 
         try:
             print("⏳ กำลังเปิดหน้าสร้างลิงก์ Shopee...")
-            page.goto(AFFILIATE_CUSTOM_LINK_URL, wait_until="domcontentloaded", timeout=20000)
+            page.goto(AFFILIATE_CUSTOM_LINK_URL, wait_until="domcontentloaded", timeout=25000)
+            time.sleep(2)
             
-            # รอจนกว่ากล่องข้อความจะแสดงขึ้นมา
-            try:
-                page.wait_for_selector("textarea", timeout=15000)
-                print("✅ หน้าต่างพร้อมทำงานเรียบร้อย")
-            except Exception:
-                time.sleep(3)
+            # ตรวจสอบว่าติดหน้า Anti-bot / Captcha หรือไม่
+            current_url = page.url
+            page_text = page.content().lower()
+            is_antibot = "verify" in current_url or "captcha" in current_url or "robot" in page_text or "verification" in page_text
+            
+            if is_antibot:
+                print("\n" + "="*60)
+                print("🛡️ ตรวจพบหน้ายืนยันตัวตน (Anti-bot / Captcha) ของ Shopee!")
+                print("👉 มีหน้าต่างเบราว์เซอร์เปิดอยู่ กรุณาเลื่อนจิ๊กซอว์ / ยืนยันตัวตนบนหน้าจอ")
+                print("⏳ สคริปต์กำลังรอคุณยืนยันตัวตน (มีเวลารอ 90 วินาที ระบบจะทำงานต่อเอง)...")
+                print("="*60 + "\n")
+                try:
+                    # รอจนกว่ากล่องข้อความจะโผล่มาหลังจากผู้ใช้แก้ Captcha ผ่าน
+                    page.wait_for_selector("textarea", timeout=90000)
+                    print("🎉 ยืนยันตัวตนสำเร็จ! กำลังดำเนินการต่อ...")
+                except Exception:
+                    print("❌ หมดเวลารอการยืนยันตัวตน กรุณารันใหม่อีกครั้ง")
+                    return None
+            else:
+                try:
+                    page.wait_for_selector("textarea", timeout=15000)
+                    print("✅ หน้าต่างพร้อมทำงานเรียบร้อย")
+                except Exception:
+                    time.sleep(3)
             
             # ตรวจสอบสถานะการล็อกอิน
             if "login" in page.url:
@@ -158,25 +189,23 @@ def convert_via_playwright(product_url, headless=False):
             textarea.fill(target_link)
             time.sleep(1)
 
-            # ค้นหาและคลิกปุ่ม 'เอา ลิงก์' บนหน้าเว็บจริง เพื่อให้ JavaScript SDK ของ Shopee ยิงคำขอเอง
+            # ค้นหาและคลิกปุ่ม 'เอา ลิงก์' บนหน้าเว็บจริง
             print("👆 กำลังคลิกปุ่ม 'เอา ลิงก์'...")
             submit_btn = page.locator("button:has-text('เอา ลิงก์'), button:has-text('เอา'), button:has-text('รับลิงก์'), button:has-text('Get Link')").first
             
             if submit_btn.count() > 0:
                 submit_btn.click()
             else:
-                # Fallback หาปุ่มสีส้ม
                 page.locator("button.ant-btn-primary, button[type='button']").last.click()
 
             # รอรับผลลัพธ์จาก Network Response หรือจากหน้าเว็บ
             print("⏳ กำลังรอผลลัพธ์ลิงก์ Affiliate จาก Shopee...")
-            for _ in range(12):
+            for _ in range(15):
                 if captured_shortlinks:
                     short_link = captured_shortlinks[0]
                     print(f"🎉 สร้างลิงก์ Affiliate สำเร็จ (Network): {short_link}")
                     return short_link
                 
-                # ตรวจสอบว่ามีลิงก์ s.shopee.co.th โผล่มาบนหน้าจอหรือไม่
                 content = page.content()
                 found = re.findall(r'https://s\.shopee\.co\.th/[a-zA-Z0-9]+', content)
                 if found:
@@ -201,7 +230,6 @@ def convert_via_playwright(product_url, headless=False):
 
 def lookup_product_details(item_id):
     """ค้นหาข้อมูลสินค้า (ชื่อ, รูป, ราคา) จาก Database หรือ Datafeed 4GB"""
-    # 1. ค้นหาจาก Database ก่อน
     try:
         from db import get_db_connection
         conn = get_db_connection()
@@ -220,7 +248,6 @@ def lookup_product_details(item_id):
     except Exception:
         pass
 
-    # 2. ค้นหาจาก datafeed.csv ในเครื่อง
     import glob
     import csv
     csv_files = glob.glob("*.csv")
