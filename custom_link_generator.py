@@ -105,26 +105,33 @@ def convert_via_playwright(product_url, headless=False):
         page.set_default_timeout(20000)
         
         try:
-            # เปิดหน้า Custom Link (ใช้ domcontentloaded แทน networkidle ป้องกัน Timeout)
+            # เปิดหน้า Custom Link
             print("⏳ กำลังเปิดหน้าสร้างลิงก์ Shopee...")
             page.goto(AFFILIATE_CUSTOM_LINK_URL, wait_until="domcontentloaded", timeout=20000)
-            time.sleep(2)
+            
+            # รอให้ Single Page Application (SPA) ของ Shopee เรนเดอร์เสร็จสมบูรณ์
+            try:
+                page.wait_for_selector("textarea", timeout=15000)
+                print("✅ หน้าต่างพร้อมทำงานเรียบร้อย")
+            except Exception:
+                time.sleep(3)
             
             # ตรวจสอบสถานะการล็อกอิน
             if "login" in page.url:
                 print("⚠️ ยังไม่ได้ล็อกอินในระบบ Shopee Affiliate")
                 print("👉 กรุณาล็อกอินบนหน้าต่างเบราว์เซอร์ที่เปิดขึ้นมา (มีเวลารอ 60 วินาที)...")
                 try:
-                    # รอจนกว่าผู้ใช้จะล็อกอินเสร็จและกลับมาหน้า offer/custom_link
                     page.wait_for_url("**/offer/**", timeout=60000)
                     print("🎉 ตรวจพบการล็อกอินสำเร็จ!")
+                    page.wait_for_selector("textarea", timeout=15000)
                 except Exception:
                     print("❌ หมดเวลาล็อกอิน กรุณารันใหม่อีกครั้ง")
                     return None
 
             print("📡 กำลังส่งคำสั่ง batchCustomLink ภายในเบราว์เซอร์...")
+            time.sleep(1.5)
             
-            # รัน GraphQL ในหน้าต่างเบราว์เซอร์โดยตรง (ผ่าน Anti-bot 100%)
+            # รัน GraphQL ในหน้าต่างเบราว์เซอร์โดยตรง (มีระบบ Retry หากหน้าเว็บเพิ่งเสร็จการ Navigate)
             js_code = f"""
             async () => {{
                 const targetUrl = "{product_url}";
@@ -164,10 +171,22 @@ def convert_via_playwright(product_url, headless=False):
             }}
             """
             
-            result = page.evaluate(js_code)
+            result = None
+            for attempt in range(3):
+                try:
+                    result = page.evaluate(js_code)
+                    if result:
+                        break
+                except Exception as err:
+                    if "Execution context was destroyed" in str(err) or "navigation" in str(err):
+                        print(f"⏳ หน้าเว็บกำลังปรับสถานะ ลองส่งคำขอใหม่ (รอบที่ {attempt + 1}/3)...")
+                        time.sleep(2)
+                        continue
+                    else:
+                        raise err
             
             # แกะ shortLink ออกมาจาก Response
-            batch_list = result.get("data", {}).get("batchCustomLink", [])
+            batch_list = result.get("data", {}).get("batchCustomLink", []) if result else []
             if batch_list and len(batch_list) > 0:
                 short_link = batch_list[0].get("shortLink")
                 if short_link:
