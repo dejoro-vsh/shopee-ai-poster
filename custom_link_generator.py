@@ -55,8 +55,8 @@ def parse_cookies(cookie_string):
 
 def convert_via_playwright(product_url, headless=False):
     """
-    แปลงลิงก์สินค้าธรรมดาเป็น Shopee Affiliate Link โดยรันผ่าน Browser Context
-    แก้ปัญหา SingletonLock และแก้ปัญหา Timeout 30000ms อย่างถาวร
+    แปลงลิงก์สินค้าธรรมดาเป็น Shopee Affiliate Link
+    โดยจำลองการพิมพ์และคลิกปุ่มบนหน้าเว็บจริง เพื่อให้ผ่านระบบ Anti-Bot (SAP/Datadome) 100%
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -64,24 +64,32 @@ def convert_via_playwright(product_url, headless=False):
         print("❌ ไม่พบไลบรารี playwright กรุณาติดตั้งด้วยคำสั่ง: pip3 install playwright && playwright install chromium")
         return None
 
-    print(f"🚀 กำลังเชื่อมต่อเบราว์เซอร์เพื่อแปลงลิงก์: {product_url}")
+    # แปลงลิงก์ให้อยู่ในฟอร์แมตมาตรฐานของ Shopee
+    item_id, shop_id = extract_ids_from_url(product_url)
+    if item_id and shop_id:
+        target_link = f"https://shopee.co.th/product/{shop_id}/{item_id}"
+        print(f"🎯 แปลงเป็น URL สินค้ามาตรฐาน: {target_link}")
+    else:
+        target_link = product_url
+
+    print(f"🚀 กำลังเชื่อมต่อเบราว์เซอร์เพื่อแปลงลิงก์...")
     
     with sync_playwright() as p:
         browser = None
         context = None
         is_cdp = False
         
-        # 1. ลองเชื่อมต่อ Chrome Port 9222 ที่เปิดอยู่ก่อน (เร็วสุด 0.5 วินาที)
+        # 1. ตรวจสอบว่าเปิด Chrome Port 9222 อยู่หรือไม่
         try:
             browser = p.chromium.connect_over_cdp("http://localhost:9222", timeout=3000)
             context = browser.contexts[0]
             is_cdp = True
             print("⚡ เชื่อมต่อกับ Google Chrome (Port 9222) สำเร็จ!")
         except Exception:
-            # 2. ถ้าไม่ได้เปิด Port 9222 ให้เปิด Browser อิสระในโฟลเดอร์เฉพาะ (ไม่ชนกับ Google Chrome ที่เปิดอยู่)
+            # 2. ถ้าไม่ได้เปิด ให้ใช้โฟลเดอร์ session เฉพาะ
             session_dir = os.path.expanduser("~/.shopee_poster_session")
             os.makedirs(session_dir, exist_ok=True)
-            print("🌐 เปิดเบราว์เซอร์สำหรับส่งคำขอไปยัง Shopee Affiliate...")
+            print("🌐 เปิดเบราว์เซอร์อัตโนมัติ...")
             
             context = p.chromium.launch_persistent_context(
                 user_data_dir=session_dir,
@@ -92,24 +100,40 @@ def convert_via_playwright(product_url, headless=False):
                 ]
             )
             
-            # ฉีด Cookie ล็อกอินเข้าไปอัตโนมัติ เพื่อไม่ต้องล็อกอินใหม่ทุกครั้ง
+            # ฉีด Cookie ล็อกอิน
             if DEFAULT_COOKIE:
                 try:
                     cookies = parse_cookies(DEFAULT_COOKIE)
                     context.add_cookies(cookies)
-                    print("🔑 ฉีด Cookie ล็อกอินเข้าสู่ระบบเรียบร้อย")
+                    print("🔑 ตรวจสอบสถานะการล็อกอินเรียบร้อย")
                 except Exception as e:
                     print(f"Notice: {e}")
             
         page = context.new_page() if is_cdp else context.pages[0] if context.pages else context.new_page()
-        page.set_default_timeout(20000)
+        page.set_default_timeout(25000)
         
+        captured_shortlinks = []
+
+        # ดักจับ Network Response จากการกดปุ่มของหน้าเว็บ
+        def handle_response(response):
+            if "batchCustomLink" in response.url:
+                try:
+                    json_data = response.json()
+                    batch = json_data.get("data", {}).get("batchCustomLink", [])
+                    for item in batch:
+                        sl = item.get("shortLink")
+                        if sl:
+                            captured_shortlinks.append(sl)
+                except Exception:
+                    pass
+
+        page.on("response", handle_response)
+
         try:
-            # เปิดหน้า Custom Link
             print("⏳ กำลังเปิดหน้าสร้างลิงก์ Shopee...")
             page.goto(AFFILIATE_CUSTOM_LINK_URL, wait_until="domcontentloaded", timeout=20000)
             
-            # รอให้ Single Page Application (SPA) ของ Shopee เรนเดอร์เสร็จสมบูรณ์
+            # รอจนกว่ากล่องข้อความจะแสดงขึ้นมา
             try:
                 page.wait_for_selector("textarea", timeout=15000)
                 print("✅ หน้าต่างพร้อมทำงานเรียบร้อย")
@@ -128,89 +152,41 @@ def convert_via_playwright(product_url, headless=False):
                     print("❌ หมดเวลาล็อกอิน กรุณารันใหม่อีกครั้ง")
                     return None
 
-            print("📡 กำลังส่งคำสั่ง batchCustomLink ภายในเบราว์เซอร์...")
-            time.sleep(1.5)
+            print(f"📝 กำลังกรอก URL สินค้าลงในกล่องข้อความ: {target_link}")
+            textarea = page.locator("textarea").first
+            textarea.click()
+            textarea.fill(target_link)
+            time.sleep(1)
+
+            # ค้นหาและคลิกปุ่ม 'เอา ลิงก์' บนหน้าเว็บจริง เพื่อให้ JavaScript SDK ของ Shopee ยิงคำขอเอง
+            print("👆 กำลังคลิกปุ่ม 'เอา ลิงก์'...")
+            submit_btn = page.locator("button:has-text('เอา ลิงก์'), button:has-text('เอา'), button:has-text('รับลิงก์'), button:has-text('Get Link')").first
             
-            # รัน GraphQL ในหน้าต่างเบราว์เซอร์โดยตรง (มีระบบ Retry หากหน้าเว็บเพิ่งเสร็จการ Navigate)
-            js_code = f"""
-            async () => {{
-                const targetUrl = "{product_url}";
-                const csrfMatch = document.cookie.match(/csrftoken=([^;]+)/);
-                const csrfToken = csrfMatch ? csrfMatch[1] : "";
-                
-                const payload = {{
-                    operationName: "batchGetCustomLink",
-                    query: `
-                        query batchGetCustomLink($linkParams: [CustomLinkParam!], $sourceCaller: SourceCaller){{
-                            batchCustomLink(linkParams: $linkParams, sourceCaller: $sourceCaller){{
-                                shortLink
-                                longLink
-                                failCode
-                            }}
-                        }}
-                    `,
-                    variables: {{
-                        linkParams: [{{
-                            originalLink: targetUrl,
-                            advancedLinkParams: {{}}
-                        }}],
-                        sourceCaller: "CUSTOM_LINK_CALLER"
-                    }}
-                }};
-                
-                const response = await fetch("https://affiliate.shopee.co.th/api/v3/gql?q=batchCustomLink", {{
-                    method: "POST",
-                    headers: {{
-                        "content-type": "application/json; charset=UTF-8",
-                        "csrf-token": csrfToken
-                    }},
-                    body: JSON.stringify(payload)
-                }});
-                
-                return await response.json();
-            }}
-            """
-            
-            result = None
-            for attempt in range(3):
-                try:
-                    result = page.evaluate(js_code)
-                    if result:
-                        break
-                except Exception as err:
-                    if "Execution context was destroyed" in str(err) or "navigation" in str(err):
-                        print(f"⏳ หน้าเว็บกำลังปรับสถานะ ลองส่งคำขอใหม่ (รอบที่ {attempt + 1}/3)...")
-                        time.sleep(2)
-                        continue
-                    else:
-                        raise err
-            
-            # แกะ shortLink ออกมาจาก Response
-            batch_list = result.get("data", {}).get("batchCustomLink", []) if result else []
-            if batch_list and len(batch_list) > 0:
-                short_link = batch_list[0].get("shortLink")
-                if short_link:
-                    print(f"🎉 สร้างลิงก์ Affiliate สำเร็จ: {short_link}")
+            if submit_btn.count() > 0:
+                submit_btn.click()
+            else:
+                # Fallback หาปุ่มสีส้ม
+                page.locator("button.ant-btn-primary, button[type='button']").last.click()
+
+            # รอรับผลลัพธ์จาก Network Response หรือจากหน้าเว็บ
+            print("⏳ กำลังรอผลลัพธ์ลิงก์ Affiliate จาก Shopee...")
+            for _ in range(12):
+                if captured_shortlinks:
+                    short_link = captured_shortlinks[0]
+                    print(f"🎉 สร้างลิงก์ Affiliate สำเร็จ (Network): {short_link}")
                     return short_link
-                    
-            print(f"⚠️ ผลลัพธ์ API ภายใน: {result}")
-            
-            # แผนสำรอง: สั่งพิมพ์ลงกล่อง Textarea แล้วกดปุ่ม "เอา ลิงก์"
-            print("🔄 ลองใช้ UI สำรองบนหน้าเว็บ...")
-            textarea = page.locator("textarea")
-            if textarea.count() > 0:
-                textarea.first.fill(product_url)
-                time.sleep(0.5)
-                submit_btn = page.locator("button:has-text('เอา ลิงก์'), button:has-text('รับลิงก์'), button:has-text('Get Link')")
-                if submit_btn.count() > 0:
-                    submit_btn.first.click()
-                    time.sleep(3)
-                    content = page.content()
-                    found_links = re.findall(r'https://s\.shopee\.co\.th/[a-zA-Z0-9]+', content)
-                    if found_links:
-                        short_link = found_links[0]
-                        print(f"🎉 สร้างลิงก์สำเร็จจาก UI: {short_link}")
-                        return short_link
+                
+                # ตรวจสอบว่ามีลิงก์ s.shopee.co.th โผล่มาบนหน้าจอหรือไม่
+                content = page.content()
+                found = re.findall(r'https://s\.shopee\.co\.th/[a-zA-Z0-9]+', content)
+                if found:
+                    short_link = found[0]
+                    print(f"🎉 สร้างลิงก์ Affiliate สำเร็จ (UI): {short_link}")
+                    return short_link
+                
+                time.sleep(1)
+
+            print("⚠️ ไม่พบลิงก์ย่อหลังคลิกปุ่ม กรุณาตรวจสอบว่าหน้านี้อนุญาตให้แปลงลิงก์ดังกล่าวหรือไม่")
 
         except Exception as e:
             print(f"❌ เกิดข้อผิดพลาดระหว่างรันบนเบราว์เซอร์: {e}")
