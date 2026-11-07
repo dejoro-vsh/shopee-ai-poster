@@ -1,4 +1,6 @@
-psycopg2-binary==2.9.9
+psycopg2-binary
 google-generativeai==0.7.2
 python-dotenv==1.0.1
 requests==2.32.3
+tweepy
+playwright>=1.40.0
