@@ -60,7 +60,28 @@ def get_todays_products(limit=50):
             cur.execute(query, (latest_date, latest_date, latest_date))
             
             # Sort the combined results by commission descending
-            products = cur.fetchall()
+            products = list(cur.fetchall())
+            
+            # ตรวจสอบว่ามีสินค้าที่ยังไม่เคยโพสต์หรือไม่
+            cur.execute("SELECT product_id FROM posted_history")
+            posted_set = set(str(row['product_id']) for row in cur.fetchall())
+            unposted = [p for p in products if str(p['product_id']) not in posted_set]
+            
+            # ถ้าสินค้าของวันที่ล่าสุดถูกโพสต์หมดแล้ว ให้ดึงสินค้าค้างท่อที่ยังไม่เคยโพสต์จากวันก่อนๆ
+            if not unposted:
+                fallback_query = """
+                    SELECT id, item_id as product_id, title as item_name, price, price as discount_price, 
+                           commission, image_url, affiliate_link as aff_link, shop_name as category_name,
+                           description, sales, rating, all_images
+                    FROM shopee_products
+                    WHERE item_id NOT IN (SELECT product_id FROM posted_history)
+                      AND (image_url IS NOT NULL AND image_url != '')
+                    ORDER BY sales DESC, commission DESC
+                    LIMIT %s
+                """
+                cur.execute(fallback_query, (limit,))
+                products = list(cur.fetchall())
+                
             products.sort(key=lambda x: (x.get('sales') or 0, x.get('commission') or 0), reverse=True)
             return products[:limit]
     except Exception as e:

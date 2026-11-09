@@ -5,10 +5,15 @@ import json
 import db
 
 def find_csv():
+    if os.path.exists("datafeed.csv"):
+        return "datafeed.csv"
+    feed_files = glob.glob("*Product Feed*.csv")
+    if feed_files:
+        return max(feed_files, key=os.path.getsize)
     csv_files = glob.glob("*.csv")
     if not csv_files:
         return None
-    return "datafeed.csv" if "datafeed.csv" in csv_files else csv_files[0]
+    return max(csv_files, key=os.path.getsize)
 
 def enrich_database():
     csv_file = find_csv()

@@ -60,7 +60,8 @@ def generate_affiliate_link(product_url, affiliate_id=None, sub_id="ai_poster"):
     # โครงสร้างทางการของ Shopee Affiliate Network Redirect
     aff_url = f"https://s.shopee.co.th/an_redir?origin_link={encoded_target}?&affiliate_id={aff_id}"
     if sub_id:
-        aff_url += f"&sub_id={sub_id}"
+        clean_sub = re.sub(r'[^a-zA-Z0-9-]', '-', str(sub_id)).strip('-')
+        aff_url += f"&sub_id={clean_sub}"
         
     return aff_url, clean_target
 
