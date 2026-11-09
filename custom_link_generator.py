@@ -18,23 +18,17 @@ def extract_ids_from_url(url):
     """แยก item_id และ shop_id จาก URL ของ Shopee"""
     item_id, shop_id = None, None
     
-    # แบบ /product/shop_id/item_id
     m1 = re.search(r'product/(\d+)/(\d+)', url)
     if m1:
-        shop_id, item_id = m1.group(1), m1.group(2)
-        return item_id, shop_id
+        return m1.group(2), m1.group(1)
 
-    # แบบ -i.shop_id.item_id
     m2 = re.search(r'-i\.(\d+)\.(\d+)', url)
     if m2:
-        shop_id, item_id = m2.group(1), m2.group(2)
-        return item_id, shop_id
+        return m2.group(2), m2.group(1)
         
-    # แบบ itemKeys=item_id.xxx.&shopId=shop_id (จากตะกร้า/cart)
     m3 = re.search(r'itemKeys=(\d+).*shopId=(\d+)', url)
     if m3:
-        item_id, shop_id = m3.group(1), m3.group(2)
-        return item_id, shop_id
+        return m3.group(1), m3.group(2)
 
     return None, None
 
@@ -53,10 +47,38 @@ def parse_cookies(cookie_string):
             })
     return cookies
 
+def ensure_chrome_debugging_on_mac():
+    """เปิด Google Chrome บน Mac ในโหมด Port 9222 อัตโนมัติ (ไม่ชนกับ Chrome ที่กำลังทำงานอยู่)"""
+    if sys.platform != "darwin":
+        return
+    try:
+        r = requests.get("http://localhost:9222/json/version", timeout=1)
+        if r.status_code == 200:
+            return
+    except Exception:
+        pass
+
+    chrome_app = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    if os.path.exists(chrome_app):
+        import subprocess
+        profile_dir = os.path.expanduser("~/.shopee_chrome_profile")
+        os.makedirs(profile_dir, exist_ok=True)
+        print("🚀 กำลังเปิด Google Chrome บน Mac (Port 9222) อัตโนมัติ...")
+        cmd = [
+            chrome_app,
+            "--remote-debugging-port=9222",
+            f"--user-data-dir={profile_dir}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            AFFILIATE_CUSTOM_LINK_URL
+        ]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(3)
+
 def convert_via_playwright(product_url, headless=False):
     """
     แปลงลิงก์สินค้าธรรมดาเป็น Shopee Affiliate Link
-    พร้อมระบบ Stealth Bypass Anti-Bot และรองรับการแก้ Captcha อัตโนมัติ
+    ใช้การฉีด DOM Value ตรง 100% ไร้ปัญหา Locator.click Timeout และ Detached DOM
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -72,6 +94,9 @@ def convert_via_playwright(product_url, headless=False):
     else:
         target_link = product_url
 
+    # พยายามเปิด Chrome Port 9222 อัตโนมัติถ้าอยู่บน Mac
+    ensure_chrome_debugging_on_mac()
+
     print(f"🚀 กำลังเชื่อมต่อเบราว์เซอร์เพื่อแปลงลิงก์...")
     
     with sync_playwright() as p:
@@ -79,19 +104,18 @@ def convert_via_playwright(product_url, headless=False):
         context = None
         is_cdp = False
         
-        # 1. วิธีที่ดีที่สุด 100%: ตรวจสอบว่ามี Google Chrome รันด้วย Remote Debugging Port 9222 อยู่หรือไม่
+        # 1. เชื่อมต่อ Chrome Port 9222 (ไร้ Anti-bot 100%)
         try:
             browser = p.chromium.connect_over_cdp("http://localhost:9222", timeout=3000)
             context = browser.contexts[0]
             is_cdp = True
-            print("⚡ เชื่อมต่อกับ Google Chrome ตัวจริงบน Mac (Port 9222) สำเร็จ! (ไร้ Anti-bot 100%)")
+            print("⚡ เชื่อมต่อกับ Google Chrome (Port 9222) สำเร็จ! (ไร้ Anti-bot 100%)")
         except Exception:
             # 2. ถ้าไม่ได้เปิด Port 9222 ให้เปิด Browser พร้อมระบบ Stealth Evasion
             session_dir = os.path.expanduser("~/.shopee_poster_session")
             os.makedirs(session_dir, exist_ok=True)
             print("🌐 เปิดเบราว์เซอร์พร้อมระบบหลบหลีก Anti-Bot...")
             
-            # ใช้ Chrome จริงของ macOS ถ้ามี เพื่อลดการถูกมองว่าเป็น Bot
             use_channel = "chrome" if (sys.platform == "darwin" and os.path.exists("/Applications/Google Chrome.app")) else None
             
             context = p.chromium.launch_persistent_context(
@@ -105,14 +129,12 @@ def convert_via_playwright(product_url, headless=False):
                 ]
             )
             
-            # ฉีด Script ลบค่า navigator.webdriver เพื่อหลบ Anti-Bot
             context.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
                 window.navigator.chrome = { runtime: {} };
                 Object.defineProperty(navigator, 'languages', { get: () => ['th-TH', 'th', 'en-US', 'en'] });
             """)
             
-            # ฉีด Cookie ล็อกอิน
             if DEFAULT_COOKIE:
                 try:
                     cookies = parse_cookies(DEFAULT_COOKIE)
@@ -136,7 +158,7 @@ def convert_via_playwright(product_url, headless=False):
         
         captured_shortlinks = []
 
-        # ดักจับ Network Response
+        # ดักจับ Network Response ทันทีที่ปุ่มถูกคลิก
         def handle_response(response):
             if "batchCustomLink" in response.url:
                 try:
@@ -160,32 +182,29 @@ def convert_via_playwright(product_url, headless=False):
                 print("⚡ ใช้แท็บ Shopee Affiliate ที่เปิดค้างอยู่บนจอได้ทันที!")
                 time.sleep(1)
             
-            # ตรวจสอบว่าติดหน้า Anti-bot / Captcha หรือไม่
+            # ตรวจสอบสถานะ Anti-bot / Captcha
             current_url = page.url
             page_text = page.content().lower()
-            is_antibot = "verify" in current_url or "captcha" in current_url or "robot" in page_text or "verification" in page_text
-            
-            if is_antibot:
+            if "verify" in current_url or "captcha" in current_url or "robot" in page_text:
                 print("\n" + "="*60)
                 print("🛡️ ตรวจพบหน้ายืนยันตัวตน (Anti-bot / Captcha) ของ Shopee!")
-                print("👉 มีหน้าต่างเบราว์เซอร์เปิดอยู่ กรุณาเลื่อนจิ๊กซอว์ / ยืนยันตัวตนบนหน้าจอ")
-                print("⏳ สคริปต์กำลังรอคุณยืนยันตัวตน (มีเวลารอ 90 วินาที ระบบจะทำงานต่อเอง)...")
+                print("👉 กรุณาเลื่อนจิ๊กซอว์ / ยืนยันตัวตนบนหน้าจอเบราว์เซอร์")
+                print("⏳ สคริปต์กำลังรอคุณยืนยันตัวตน (มีเวลารอ 90 วินาที)...")
                 print("="*60 + "\n")
                 try:
-                    # รอจนกว่ากล่องข้อความจะโผล่มาหลังจากผู้ใช้แก้ Captcha ผ่าน
                     page.wait_for_selector("textarea", timeout=90000)
                     print("🎉 ยืนยันตัวตนสำเร็จ! กำลังดำเนินการต่อ...")
                 except Exception:
-                    print("❌ หมดเวลารอการยืนยันตัวตน กรุณารันใหม่อีกครั้ง")
+                    print("❌ หมดเวลารอการยืนยันตัวตน")
                     return None
             else:
                 try:
-                    page.wait_for_selector("textarea", timeout=15000)
+                    page.wait_for_selector("textarea", timeout=20000)
                     print("✅ หน้าต่างพร้อมทำงานเรียบร้อย")
                 except Exception:
-                    time.sleep(3)
+                    time.sleep(2)
             
-            # ตรวจสอบสถานะการล็อกอิน
+            # ตรวจสอบสถานะล็อกอิน
             if "login" in page.url:
                 print("⚠️ ยังไม่ได้ล็อกอินในระบบ Shopee Affiliate")
                 print("👉 กรุณาล็อกอินบนหน้าต่างเบราว์เซอร์ที่เปิดขึ้นมา (มีเวลารอ 60 วินาที)...")
@@ -198,21 +217,39 @@ def convert_via_playwright(product_url, headless=False):
                     return None
 
             print(f"📝 กำลังกรอก URL สินค้าลงในกล่องข้อความ: {target_link}")
-            textarea = page.locator("textarea").first
-            textarea.click()
-            textarea.fill(target_link)
+            time.sleep(1)
+            
+            # 🚀 แก้ไขถาวร: ใช้ JavaScript DOM Injection แทน Locator.click() ที่ชอบ Detached
+            page.evaluate("""(link) => {
+                const ta = document.querySelector('textarea');
+                if (ta) {
+                    ta.focus();
+                    ta.value = link;
+                    ta.dispatchEvent(new Event('input', { bubbles: true }));
+                    ta.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }""", target_link)
             time.sleep(1)
 
-            # ค้นหาและคลิกปุ่ม 'เอา ลิงก์' บนหน้าเว็บจริง
+            # คลิกปุ่ม 'เอา ลิงก์' ผ่าน JavaScript DOM Event
             print("👆 กำลังคลิกปุ่ม 'เอา ลิงก์'...")
-            submit_btn = page.locator("button:has-text('เอา ลิงก์'), button:has-text('เอา'), button:has-text('รับลิงก์'), button:has-text('Get Link')").first
-            
-            if submit_btn.count() > 0:
-                submit_btn.click()
-            else:
-                page.locator("button.ant-btn-primary, button[type='button']").last.click()
+            page.evaluate("""() => {
+                const btns = Array.from(document.querySelectorAll('button'));
+                const btn = btns.find(b => 
+                    b.textContent.includes('เอา ลิงก์') || 
+                    b.textContent.includes('เอา') || 
+                    b.textContent.includes('รับลิงก์') ||
+                    b.textContent.includes('Get Link')
+                );
+                if (btn) {
+                    btn.click();
+                } else {
+                    const primary = document.querySelector('button.ant-btn-primary') || document.querySelector('button[type="button"]');
+                    if (primary) primary.click();
+                }
+            }""")
 
-            # รอรับผลลัพธ์จาก Network Response หรือจากหน้าเว็บ
+            # รอรับผลลัพธ์
             print("⏳ กำลังรอผลลัพธ์ลิงก์ Affiliate จาก Shopee...")
             for _ in range(15):
                 if captured_shortlinks:
