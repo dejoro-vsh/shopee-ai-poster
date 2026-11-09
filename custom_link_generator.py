@@ -94,9 +94,6 @@ def convert_via_playwright(product_url, headless=False):
     else:
         target_link = product_url
 
-    # พยายามเปิด Chrome Port 9222 อัตโนมัติถ้าอยู่บน Mac
-    ensure_chrome_debugging_on_mac()
-
     print(f"🚀 กำลังเชื่อมต่อเบราว์เซอร์เพื่อแปลงลิงก์...")
     
     with sync_playwright() as p:
@@ -116,16 +113,13 @@ def convert_via_playwright(product_url, headless=False):
             os.makedirs(session_dir, exist_ok=True)
             print("🌐 เปิดเบราว์เซอร์พร้อมระบบหลบหลีก Anti-Bot...")
             
-            use_channel = "chrome" if (sys.platform == "darwin" and os.path.exists("/Applications/Google Chrome.app")) else None
-            
             context = p.chromium.launch_persistent_context(
                 user_data_dir=session_dir,
-                channel=use_channel,
                 headless=headless,
                 args=[
                     "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-infobars"
+                    "--disable-infobars",
+                    "--disable-gpu"
                 ]
             )
             
