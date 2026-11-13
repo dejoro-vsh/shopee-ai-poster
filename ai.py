@@ -4,30 +4,14 @@ import time
 import google.generativeai as genai
 from google.api_core import exceptions
 
-_cached_models = None
-
 def get_available_models():
-    """ดึงรายชื่อโมเดล Flash ที่บัญชีนี้รองรับและใช้งานได้จริงจาก Google AI โดยตรง"""
-    global _cached_models
-    if _cached_models:
-        return _cached_models
-        
-    models = []
-    try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                clean_name = m.name.replace('models/', '')
-                if 'flash' in clean_name.lower():
-                    models.append(clean_name)
-    except Exception as e:
-        pass
-        
-    # ลำดับเริ่มต้นถ้าดึงไม่สำเร็จ
-    if not models:
-        models = ['gemini-flash-latest']
-        
-    _cached_models = models
-    return _cached_models
+    """โมเดลเป้าหมายหลักตามที่ผู้ใช้กำหนด: gemini-3.1-flash-lite"""
+    return [
+        'gemini-3.1-flash-lite',
+        'models/gemini-3.1-flash-lite',
+        'gemini-2.5-flash',
+        'gemini-flash-latest'
+    ]
 
 def call_gemini_with_retry(prompt, generation_config=None, max_retries=3):
     """
@@ -59,7 +43,7 @@ def call_gemini_with_retry(prompt, generation_config=None, max_retries=3):
                 wait_seconds = 20 * (attempt + 1)
                 print(f"⏳ ติด Gemini Rate Limit (429) บนโมเดล {model_name}. กำลังรอ {wait_seconds} วินาทีเพื่อลองใหม่ (รอบที่ {attempt + 1}/{max_retries})...")
                 time.sleep(wait_seconds)
-                break
+                continue
             except exceptions.NotFound:
                 # ถ้าโมเดลไม่มีอยู่ ให้ข้ามไปโมเดลถัดไปทันที
                 continue
