@@ -4,19 +4,43 @@ import time
 import google.generativeai as genai
 from google.api_core import exceptions
 
+_cached_models = None
+
+def get_available_models():
+    """ดึงรายชื่อโมเดล Flash ที่บัญชีนี้รองรับและใช้งานได้จริงจาก Google AI โดยตรง"""
+    global _cached_models
+    if _cached_models:
+        return _cached_models
+        
+    models = []
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                clean_name = m.name.replace('models/', '')
+                if 'flash' in clean_name.lower():
+                    models.append(clean_name)
+    except Exception as e:
+        pass
+        
+    # ลำดับเริ่มต้นถ้าดึงไม่สำเร็จ
+    if not models:
+        models = ['gemini-flash-latest']
+        
+    _cached_models = models
+    return _cached_models
+
 def call_gemini_with_retry(prompt, generation_config=None, max_retries=3):
     """
-    เรียก Gemini API พร้อมระบบ Retry อัตโนมัติเมื่อติด Rate Limit (429) หรือ Network Error
-    - รองรับ Cooldown อัตโนมัติเมื่อติด Quota Free-tier (5-15 RPM)
-    - Fallback สลับโมเดลอัตโนมัติ (gemini-1.5-flash / gemini-flash-latest)
+    เรียก Gemini API พร้อมระบบ Dynamic Model Discovery และ Cooldown อัตโนมัติ
+    - ดึงโมเดลจริงที่เปิดใช้งานอยู่จาก list_models เพื่อป้องกัน Error 404
+    - Cooldown อัตโนมัติเมื่อติด Rate Limit (429)
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY is not set in .env")
     
     genai.configure(api_key=api_key)
-    # ใช้โมเดลมาตรฐานที่มีโควต้า Free Tier สูงสุด 1,500 ครั้ง/วัน (ไม่ใช้ preview ที่จำกัด 20 ครั้ง/วัน)
-    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-flash-8b']
+    models_to_try = get_available_models()
 
     if generation_config is None:
         generation_config = {
@@ -33,15 +57,18 @@ def call_gemini_with_retry(prompt, generation_config=None, max_retries=3):
                     return result
             except exceptions.ResourceExhausted as e:
                 wait_seconds = 20 * (attempt + 1)
-                print(f"⏳ ติด Gemini Free-tier Rate Limit (429) บนโมเดล {model_name}. กำลังรอ {wait_seconds} วินาทีเพื่อลองใหม่ (รอบที่ {attempt + 1}/{max_retries})...")
+                print(f"⏳ ติด Gemini Rate Limit (429) บนโมเดล {model_name}. กำลังรอ {wait_seconds} วินาทีเพื่อลองใหม่ (รอบที่ {attempt + 1}/{max_retries})...")
                 time.sleep(wait_seconds)
                 break
+            except exceptions.NotFound:
+                # ถ้าโมเดลไม่มีอยู่ ให้ข้ามไปโมเดลถัดไปทันที
+                continue
             except json.JSONDecodeError:
                 print(f"⚠️ แปลงผลลัพธ์เป็น JSON ไม่สำเร็จจากโมเดล {model_name}: {response.text[:150]}")
                 continue
             except Exception as e:
                 print(f"⚠️ เกิดข้อผิดพลาดเมื่อเรียก {model_name}: {e}")
-                time.sleep(5)
+                time.sleep(3)
                 continue
 
     print("❌ ไม่สามารถดึงข้อมูลจาก Gemini ได้หลังจากลองใหม่ครบทุกรอบ")
