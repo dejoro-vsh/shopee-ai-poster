@@ -1,5 +1,17 @@
 import os
+import socket
+import urllib3.util.connection as urllib3_cn
+
+# บังคับให้ Python requests, urllib3 และ Tweepy ใช้ IPv4 เท่านั้น (100% IPv4)
+# แก้ปัญหา [Errno 65] No route to host บน macOS อย่างถาวร เมื่อเครือข่ายมีปัญหา IPv6 routing
+def force_ipv4():
+    return socket.AF_INET
+
+urllib3_cn.allowed_gai_family = force_ipv4
+
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 import tweepy
 
 class SocialPoster:
@@ -16,11 +28,17 @@ class SocialPoster:
         self.twitter_access_token = os.getenv("TWITTER_ACCESS_TOKEN")
         self.twitter_access_token_secret = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
         
+        # สร้าง Session ที่มี Auto-retry และบีบใช้ IPv4 เพื่อความเสถียรสูงสุด
+        self.session = requests.Session()
+        retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retries)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
+        
     def _normalize_image_url(self, url):
         """แปลง CDN Shopee ให้เป็น Tencent CDN (down-th.img.susercontent.com) เพื่อความเร็วและไม่โดนบล็อก"""
         if not url:
             return None
-        # เปลี่ยน cf.shopee.co.th เป็น down-th.img.susercontent.com ที่โหลดเร็วกว่าและเสถียร 100%
         return url.replace("cf.shopee.co.th/file/", "down-th.img.susercontent.com/file/")
 
     def post_all(self, ai_result, image_url, link):
@@ -48,7 +66,7 @@ class SocialPoster:
         return results
 
     def post_to_facebook(self, message, image_url=None, link=None):
-        """Posts to a Facebook Page using Graph API with automatic Feed Link Fallback"""
+        """Posts to a Facebook Page using Graph API via IPv4 with automatic Feed Link Fallback"""
         print("Posting to Facebook...")
         clean_img_url = self._normalize_image_url(image_url)
         
@@ -63,7 +81,7 @@ class SocialPoster:
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     "Referer": "https://shopee.co.th/"
                 }
-                img_response = requests.get(clean_img_url, headers=headers, stream=True, timeout=12)
+                img_response = self.session.get(clean_img_url, headers=headers, stream=True, timeout=12)
                 img_response.raise_for_status()
                 
                 with open(temp_img_path, 'wb') as f:
@@ -76,7 +94,7 @@ class SocialPoster:
 
             if image_downloaded and os.path.exists(temp_img_path):
                 try:
-                    print(f"  -> Uploading image to Facebook Page...")
+                    print(f"  -> Uploading image to Facebook Page (via IPv4)...")
                     photo_url = f"https://graph.facebook.com/v21.0/{self.fb_page_id}/photos"
                     with open(temp_img_path, 'rb') as img_file:
                         payload = {
@@ -86,7 +104,7 @@ class SocialPoster:
                         files = {
                             "source": ("image.jpg", img_file, "image/jpeg")
                         }
-                        response = requests.post(photo_url, data=payload, files=files, timeout=25)
+                        response = self.session.post(photo_url, data=payload, files=files, timeout=20)
                     
                     if os.path.exists(temp_img_path):
                         os.remove(temp_img_path)
@@ -106,7 +124,7 @@ class SocialPoster:
 
         # 2. Fallback: โพสต์เข้า Page Feed ตรงๆ (Facebook จะดึง Rich Preview Card อัตโนมัติจากเว็บบล็อก)
         try:
-            print("  -> Posting directly to Facebook Page Feed...")
+            print("  -> Posting directly to Facebook Page Feed (via IPv4)...")
             feed_url = f"https://graph.facebook.com/v21.0/{self.fb_page_id}/feed"
             payload = {
                 "message": message,
@@ -115,7 +133,7 @@ class SocialPoster:
             if link:
                 payload["link"] = link
                 
-            response = requests.post(feed_url, data=payload, timeout=20)
+            response = self.session.post(feed_url, data=payload, timeout=15)
             response.raise_for_status()
             post_id = response.json().get('id')
             print(f"  ✅ Facebook Feed Post Success! ID: {post_id}")
@@ -153,7 +171,7 @@ class SocialPoster:
         payload = {"messages": messages}
         
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=15)
+            response = self.session.post(url, headers=headers, json=payload, timeout=15)
             response.raise_for_status()
             print("  ✅ LINE Broadcast Success!")
             return "Success"
@@ -168,7 +186,7 @@ class SocialPoster:
                 try:
                     print("  -> Retrying LINE with text-only message...")
                     fallback_payload = {"messages": [{"type": "text", "text": message}]}
-                    res = requests.post(url, headers=headers, json=fallback_payload, timeout=15)
+                    res = self.session.post(url, headers=headers, json=fallback_payload, timeout=15)
                     res.raise_for_status()
                     print("  ✅ LINE Text Broadcast Success!")
                     return "Success (Text only)"
@@ -178,7 +196,7 @@ class SocialPoster:
             return "Failed"
             
     def post_to_twitter(self, message, image_url=None):
-        """Posts to Twitter using Tweepy API v2 (Free Tier)"""
+        """Posts to Twitter using Tweepy API v2 via IPv4"""
         print("Posting to Twitter...")
         try:
             client = tweepy.Client(
@@ -187,6 +205,10 @@ class SocialPoster:
                 access_token=self.twitter_access_token,
                 access_token_secret=self.twitter_access_token_secret
             )
+            # ผูก session ให้ Tweepy ใช้ IPv4
+            if hasattr(client, 'session'):
+                client.session = self.session
+                
             response = client.create_tweet(text=message)
             tweet_id = response.data['id']
             print(f"  ✅ Twitter Post Success! ID: {tweet_id}")
