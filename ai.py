@@ -15,7 +15,8 @@ def call_gemini_with_retry(prompt, generation_config=None, max_retries=3):
         raise ValueError("GEMINI_API_KEY is not set in .env")
     
     genai.configure(api_key=api_key)
-    models_to_try = ['gemini-1.5-flash', 'gemini-flash-latest']
+    # ใช้โมเดลมาตรฐานที่มีโควต้า Free Tier สูงสุด 1,500 ครั้ง/วัน (ไม่ใช้ preview ที่จำกัด 20 ครั้ง/วัน)
+    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-flash-8b']
 
     if generation_config is None:
         generation_config = {
