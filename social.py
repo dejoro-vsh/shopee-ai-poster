@@ -1,6 +1,7 @@
 import os
 import requests
 import tweepy
+
 class SocialPoster:
     def __init__(self):
         # API Keys loaded from .env
@@ -15,6 +16,13 @@ class SocialPoster:
         self.twitter_access_token = os.getenv("TWITTER_ACCESS_TOKEN")
         self.twitter_access_token_secret = os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
         
+    def _normalize_image_url(self, url):
+        """แปลง CDN Shopee ให้เป็น Tencent CDN (down-th.img.susercontent.com) เพื่อความเร็วและไม่โดนบล็อก"""
+        if not url:
+            return None
+        # เปลี่ยน cf.shopee.co.th เป็น down-th.img.susercontent.com ที่โหลดเร็วกว่าและเสถียร 100%
+        return url.replace("cf.shopee.co.th/file/", "down-th.img.susercontent.com/file/")
+
     def post_all(self, ai_result, image_url, link):
         """Helper to post to all configured platforms using specific captions"""
         cap_fb = ai_result.get('caption_facebook', '').replace("[LINK]", link)
@@ -23,90 +31,104 @@ class SocialPoster:
         
         results = {}
         if self.fb_page_id and self.fb_access_token and cap_fb:
-            results['facebook'] = self.post_to_facebook(cap_fb, image_url)
+            results['facebook'] = self.post_to_facebook(cap_fb, image_url=image_url, link=link)
         else:
-            results['facebook'] = "Skipped (Missing API Key)"
+            results['facebook'] = "Skipped (Missing API Key or Caption)"
             
         if self.line_channel_access_token and cap_line:
-            results['line'] = self.post_to_line(cap_line, image_url)
+            results['line'] = self.post_to_line(cap_line, image_url=image_url)
         else:
             results['line'] = "Skipped (Missing API Key or Caption)"
             
         if self.twitter_api_key and self.twitter_access_token and cap_tw:
-            results['twitter'] = self.post_to_twitter(cap_tw, image_url)
+            results['twitter'] = self.post_to_twitter(cap_tw, image_url=image_url)
         else:
             results['twitter'] = "Skipped (Missing API Key or Caption)"
             
         return results
 
-    def post_to_facebook(self, message, image_url=None):
-        """Posts to a Facebook Page using Graph API"""
+    def post_to_facebook(self, message, image_url=None, link=None):
+        """Posts to a Facebook Page using Graph API with automatic Feed Link Fallback"""
         print("Posting to Facebook...")
-        if image_url:
-            # Removed hardcoded v25.0 version to avoid version mismatch errors
-            url = f"https://graph.facebook.com/{self.fb_page_id}/photos"
+        clean_img_url = self._normalize_image_url(image_url)
+        
+        # 1. พยายามดาวน์โหลดรูปและโพสต์แบบ Photo
+        if clean_img_url:
+            temp_img_path = "temp_fb_image.jpg"
+            image_downloaded = False
             
-            # WORKAROUND: Facebook Graph API cannot download images from Shopee's CDN directly.
-            # We must download it locally first, then upload it as multipart/form-data.
             try:
-                print(f"  -> Downloading image locally from Shopee...")
-                img_response = requests.get(image_url, stream=True)
+                print(f"  -> Downloading image from fast CDN: {clean_img_url[:60]}...")
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Referer": "https://shopee.co.th/"
+                }
+                img_response = requests.get(clean_img_url, headers=headers, stream=True, timeout=12)
                 img_response.raise_for_status()
                 
-                temp_img_path = "temp_fb_image.jpg"
                 with open(temp_img_path, 'wb') as f:
-                    for chunk in img_response.iter_content(1024):
+                    for chunk in img_response.iter_content(chunk_size=8192):
                         f.write(chunk)
-                
-                print(f"  -> Uploading image to Facebook...")
-                with open(temp_img_path, 'rb') as img_file:
-                    payload = {
-                        "caption": message,
-                        "access_token": self.fb_access_token
-                    }
-                    files = {
-                        # Explicitly specify filename and mimetype for requests
-                        "source": ("image.jpg", img_file, "image/jpeg")
-                    }
-                    response = requests.post(url, data=payload, files=files)
-                
-                # Clean up temp file
-                if os.path.exists(temp_img_path):
-                    os.remove(temp_img_path)
-                    
-                response.raise_for_status()
-                return f"Success: {response.json().get('id')}"
+                image_downloaded = True
                 
             except Exception as e:
-                print("Facebook Post Error:", e)
-                # Fix response truthiness check (requests response is falsy if status >= 400)
-                if hasattr(e, 'response') and e.response is not None:
-                    try:
-                        print("FB Error Details:", e.response.json())
-                    except:
-                        print("FB Error Details:", e.response.text)
-                return "Failed"
-        else:
-            url = f"https://graph.facebook.com/{self.fb_page_id}/feed"
+                print(f"  ⚠️ ไม่สามารถโหลดรูปภาพ Shopee ได้ ({e}) -> กำลังสลับไปโพสต์แบบ Feed Link อัตโนมัติ...")
+
+            if image_downloaded and os.path.exists(temp_img_path):
+                try:
+                    print(f"  -> Uploading image to Facebook Page...")
+                    photo_url = f"https://graph.facebook.com/v21.0/{self.fb_page_id}/photos"
+                    with open(temp_img_path, 'rb') as img_file:
+                        payload = {
+                            "caption": message,
+                            "access_token": self.fb_access_token
+                        }
+                        files = {
+                            "source": ("image.jpg", img_file, "image/jpeg")
+                        }
+                        response = requests.post(photo_url, data=payload, files=files, timeout=25)
+                    
+                    if os.path.exists(temp_img_path):
+                        os.remove(temp_img_path)
+                        
+                    response.raise_for_status()
+                    post_id = response.json().get('id')
+                    print(f"  ✅ Facebook Photo Post Success! ID: {post_id}")
+                    return f"Success: {post_id}"
+                except Exception as e:
+                    if os.path.exists(temp_img_path):
+                        os.remove(temp_img_path)
+                    print("  ⚠️ Facebook Photo Upload Error:", e)
+                    if hasattr(e, 'response') and e.response is not None:
+                        try: print("  FB Error Details:", e.response.json())
+                        except: print("  FB Error Details:", e.response.text)
+                    print("  -> สลับไปใช้วิธีสำรอง: โพสต์แบบ Feed Link...")
+
+        # 2. Fallback: โพสต์เข้า Page Feed ตรงๆ (Facebook จะดึง Rich Preview Card อัตโนมัติจากเว็บบล็อก)
+        try:
+            print("  -> Posting directly to Facebook Page Feed...")
+            feed_url = f"https://graph.facebook.com/v21.0/{self.fb_page_id}/feed"
             payload = {
                 "message": message,
                 "access_token": self.fb_access_token
             }
-            try:
-                response = requests.post(url, data=payload)
-                response.raise_for_status()
-                return f"Success: {response.json().get('id')}"
-            except Exception as e:
-                print("Facebook Post Error:", e)
-                if hasattr(e, 'response') and e.response is not None:
-                    try:
-                        print("FB Error Details:", e.response.json())
-                    except:
-                        print("FB Error Details:", e.response.text)
-                return "Failed"
+            if link:
+                payload["link"] = link
+                
+            response = requests.post(feed_url, data=payload, timeout=20)
+            response.raise_for_status()
+            post_id = response.json().get('id')
+            print(f"  ✅ Facebook Feed Post Success! ID: {post_id}")
+            return f"Success: {post_id}"
+        except Exception as e:
+            print("❌ Facebook Feed Post Error:", e)
+            if hasattr(e, 'response') and e.response is not None:
+                try: print("FB Error Details:", e.response.json())
+                except: print("FB Error Details:", e.response.text)
+            return "Failed"
 
     def post_to_line(self, message, image_url=None):
-        """Broadcasts a message to LINE Official Account"""
+        """Broadcasts a message to LINE Official Account with text fallback"""
         print("Posting to LINE...")
         url = "https://api.line.me/v2/bot/message/broadcast"
         headers = {
@@ -114,12 +136,13 @@ class SocialPoster:
             "Authorization": f"Bearer {self.line_channel_access_token}"
         }
         
+        clean_img_url = self._normalize_image_url(image_url)
         messages = []
-        if image_url:
+        if clean_img_url:
             messages.append({
                 "type": "image",
-                "originalContentUrl": image_url,
-                "previewImageUrl": image_url
+                "originalContentUrl": clean_img_url,
+                "previewImageUrl": clean_img_url
             })
             
         messages.append({
@@ -130,39 +153,45 @@ class SocialPoster:
         payload = {"messages": messages}
         
         try:
-            response = requests.post(url, headers=headers, json=payload)
+            response = requests.post(url, headers=headers, json=payload, timeout=15)
             response.raise_for_status()
+            print("  ✅ LINE Broadcast Success!")
             return "Success"
         except Exception as e:
-            print("LINE Post Error:", e)
+            print("⚠️ LINE Post with image error:", e)
+            if hasattr(e, 'response') and e.response is not None:
+                try: print("LINE Error Details:", e.response.json())
+                except: print("LINE Error Details:", e.response.text)
+                
+            # Fallback text only if image failed validation
+            if clean_img_url:
+                try:
+                    print("  -> Retrying LINE with text-only message...")
+                    fallback_payload = {"messages": [{"type": "text", "text": message}]}
+                    res = requests.post(url, headers=headers, json=fallback_payload, timeout=15)
+                    res.raise_for_status()
+                    print("  ✅ LINE Text Broadcast Success!")
+                    return "Success (Text only)"
+                except Exception as e2:
+                    print("❌ LINE Text Fallback Error:", e2)
+                    
             return "Failed"
             
     def post_to_twitter(self, message, image_url=None):
         """Posts to Twitter using Tweepy API v2 (Free Tier)"""
         print("Posting to Twitter...")
         try:
-            # V2 authentication for tweeting
             client = tweepy.Client(
                 consumer_key=self.twitter_api_key,
                 consumer_secret=self.twitter_api_secret,
                 access_token=self.twitter_access_token,
                 access_token_secret=self.twitter_access_token_secret
             )
-            
-            # We skip image_upload (v1.1) because X now charges 402 Payment Required for it.
-            # Twitter will automatically pull the product image from the Shopee Link (Twitter Card)!
             response = client.create_tweet(text=message)
-                
-            return f"Success: {response.data['id']}"
+            tweet_id = response.data['id']
+            print(f"  ✅ Twitter Post Success! ID: {tweet_id}")
+            return f"Success: {tweet_id}"
             
         except Exception as e:
-            print("Twitter Post Error:", e)
+            print("❌ Twitter Post Error:", e)
             return "Failed"
-        
-    def post_to_instagram(self, message, image_url=None):
-        # Requires Facebook Graph API (Instagram Business account)
-        pass
-        
-    def post_to_tiktok(self, message, video_url=None):
-        # TikTok usually requires video, very strict API
-        pass
