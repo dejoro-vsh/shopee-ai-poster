@@ -1,21 +1,56 @@
 import os
 import json
+import time
 import google.generativeai as genai
+from google.api_core import exceptions
 
-def generate_social_content(products):
+def call_gemini_with_retry(prompt, generation_config=None, max_retries=3):
     """
-    Asks Gemini to analyze products, pick the best one, and write a caption.
-    Expects a list of dictionaries containing product details.
+    เรียก Gemini API พร้อมระบบ Retry อัตโนมัติเมื่อติด Rate Limit (429) หรือ Network Error
+    - รองรับ Cooldown อัตโนมัติเมื่อติด Quota Free-tier (5-15 RPM)
+    - Fallback สลับโมเดลอัตโนมัติ (gemini-1.5-flash / gemini-flash-latest)
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY is not set in .env")
     
     genai.configure(api_key=api_key)
-    # Use flash-latest for speed and cost-effectiveness (free tier is huge)
-    model = genai.GenerativeModel('gemini-flash-latest')
-    
-    # Prepare data for AI
+    models_to_try = ['gemini-1.5-flash', 'gemini-flash-latest']
+
+    if generation_config is None:
+        generation_config = {
+            "response_mime_type": "application/json",
+        }
+
+    for attempt in range(max_retries):
+        for model_name in models_to_try:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt, generation_config=generation_config)
+                if response and response.text:
+                    result = json.loads(response.text)
+                    return result
+            except exceptions.ResourceExhausted as e:
+                wait_seconds = 20 * (attempt + 1)
+                print(f"⏳ ติด Gemini Free-tier Rate Limit (429) บนโมเดล {model_name}. กำลังรอ {wait_seconds} วินาทีเพื่อลองใหม่ (รอบที่ {attempt + 1}/{max_retries})...")
+                time.sleep(wait_seconds)
+                break
+            except json.JSONDecodeError:
+                print(f"⚠️ แปลงผลลัพธ์เป็น JSON ไม่สำเร็จจากโมเดล {model_name}: {response.text[:150]}")
+                continue
+            except Exception as e:
+                print(f"⚠️ เกิดข้อผิดพลาดเมื่อเรียก {model_name}: {e}")
+                time.sleep(5)
+                continue
+
+    print("❌ ไม่สามารถดึงข้อมูลจาก Gemini ได้หลังจากลองใหม่ครบทุกรอบ")
+    return None
+
+def generate_social_content(products):
+    """
+    Asks Gemini to analyze products, pick the best one, and write a caption.
+    Expects a list of dictionaries containing product details.
+    """
     product_summary = []
     for p in products:
         sales_info = f" | ยอดขาย: {p.get('sales', 0)} ชิ้น" if 'sales' in p else ""
@@ -68,26 +103,12 @@ def generate_social_content(products):
         "response_mime_type": "application/json",
     }
     
-    response = model.generate_content(prompt, generation_config=generation_config)
-    
-    try:
-        result = json.loads(response.text)
-        return result
-    except json.JSONDecodeError:
-        print("Error decoding AI response:", response.text)
-        return None
+    return call_gemini_with_retry(prompt, generation_config)
 
 def generate_trend_content(products):
     """
     Asks Gemini to analyze products and write a knowledge/trend article.
     """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY is not set in .env")
-    
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-flash-latest')
-    
     product_summary = []
     for p in products[:30]: # Use top 30 to save tokens
         sales_info = f" | ยอดขาย: {p.get('sales', 0)} ชิ้น" if 'sales' in p else ""
@@ -137,11 +158,4 @@ def generate_trend_content(products):
         "response_mime_type": "application/json",
     }
     
-    response = model.generate_content(prompt, generation_config=generation_config)
-    
-    try:
-        result = json.loads(response.text)
-        return result
-    except json.JSONDecodeError:
-        print("Error decoding AI response:", response.text)
-        return None
+    return call_gemini_with_retry(prompt, generation_config)
