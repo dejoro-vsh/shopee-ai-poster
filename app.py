@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from dotenv import load_dotenv
-from db import get_todays_products, init_db, get_posted_product_ids, mark_as_posted
+from db import get_todays_products, init_db, get_posted_product_ids, mark_as_posted, get_recently_used_images
 from ai import generate_social_content, generate_trend_content
 from social import SocialPoster
 
@@ -79,17 +79,53 @@ def main():
     if not final_slug:
         final_slug = fallback_slug
         
+    recently_used_images = get_recently_used_images(limit=100)
+    
     if is_knowledge_time:
         final_title = ai_result.get("blog_title")
         final_content = ai_result.get("blog_content")
+        category = ai_result.get("category", "อื่นๆ")
         
-        # Use the image of the first product in the list as the cover for the trend
-        trend_image = products[0]['image_url'] if products else "https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80"
+        # 1. พยายามเลือกสินค้าที่ตรงกับที่ AI แนะนำ หรือสุ่มจากสินค้าที่ยังไม่เคยใช้รูป
+        chosen_prod = None
+        cover_id = ai_result.get("cover_product_id")
+        if cover_id:
+            chosen_prod = next((p for p in products if str(p['product_id']) == str(cover_id) and p.get('image_url') and p['image_url'] not in recently_used_images), None)
+            
+        if not chosen_prod:
+            # กรองสินค้าที่รูปยังไม่เคยถูกนำไปโพสต์ใน 100 บทความล่าสุด
+            available_prods = [p for p in products if p.get('image_url') and p['image_url'] not in recently_used_images]
+            if available_prods:
+                import random
+                # สุ่มเลือกจากกลุ่ม 15 อันดับแรกที่ไม่เคยใช้รูป เพื่อกระจายภาพ ไม่ให้ค้างอยู่ที่ index 0
+                chosen_prod = random.choice(available_prods[:15])
+                
+        if chosen_prod and chosen_prod.get('image_url'):
+            trend_image = chosen_prod['image_url']
+            selected_prod = chosen_prod # ให้บันทึก mark_as_posted เพื่อไม่ให้วนกลับมาซ้ำอีก
+            print(f"🖼️ เลือกรูปภาพสินค้าปกเทรนด์ (ไม่ซ้ำ): {chosen_prod.get('item_name', '')[:40]} (ID: {chosen_prod['product_id']})")
+        else:
+            # 2. กรณีสินค้าหมด หรือรูปซ้ำทั้งหมด -> สร้าง Dynamic AI Lifestyle Banner ความละเอียดสูงตามหมวดหมู่ พร้อมสุ่ม seed ทุกรอบ
+            import random
+            import urllib.parse
+            keywords_by_category = {
+                "ไอที & แกดเจ็ต": "modern minimalist workspace tech gadgets setup",
+                "เครื่องใช้ในบ้าน": "cozy modern home interior living room appliances",
+                "สุขภาพ & ความงาม": "natural organic skincare wellness spa beauty products flatlay",
+                "กีฬา & ไลฟ์สไตล์": "active lifestyle fitness gym outdoor workout gear",
+                "อื่นๆ": "trendy modern lifestyle shopping consumer products flatlay"
+            }
+            kw = keywords_by_category.get(category, "trendy modern lifestyle shopping products")
+            seed = random.randint(10000, 999999)
+            encoded_kw = urllib.parse.quote(f"{kw}, aesthetic photography, highly detailed, 8k resolution, soft natural lighting")
+            trend_image = f"https://image.pollinations.ai/prompt/{encoded_kw}?width=1200&height=800&seed={seed}"
+            selected_prod = None
+            print(f"🎨 สร้างภาพหน้าปก AI คุณภาพสูงเฉพาะบทความเทรนด์: หมวดหมู่ {category} (Seed: {seed})")
         
         # Ensure we pass an empty affiliate link for trends
         blog_url = publisher.publish_single_post(
             slug=final_slug,
-            category=ai_result.get("category", "อื่นๆ"),
+            category=category,
             title=final_title,
             content=final_content,
             excerpt=ai_result.get("blog_excerpt", ""),
@@ -98,6 +134,14 @@ def main():
         )
         social_image = trend_image
     else:
+        # กรณีรีวิวสินค้าเดี่ยว: ตรวจสอบว่ารูปของสินค้าที่เลือกซ้ำหรือไม่
+        if selected_prod and selected_prod.get('image_url') in recently_used_images:
+            print(f"⚠️ รูปภาพของสินค้า {selected_prod['product_id']} เคยใช้ไปแล้วในบทความล่าสุด กำลังสลับไปสินค้าที่มีรูปไม่ซ้ำ...")
+            alt_prod = next((p for p in products if p.get('image_url') and p['image_url'] not in recently_used_images), None)
+            if alt_prod:
+                selected_prod = alt_prod
+                print(f"🔄 สลับไปใช้สินค้า: {selected_prod.get('item_name', '')[:40]} (ID: {selected_prod['product_id']})")
+
         final_title = ai_result.get("blog_title") or selected_prod['item_name']
         final_content = ai_result.get("blog_content") or f"<p>รีวิวสินค้า {selected_prod['item_name']}</p>"
         
@@ -136,8 +180,9 @@ def main():
     print("Results:", results)
     
     # If at least one platform succeeded
-    if 'Success' in results.values():
-        if not is_knowledge_time and selected_prod:
+    is_any_success = 'Success' in results.values() or any('Success' in str(v) for v in results.values())
+    if is_any_success:
+        if selected_prod:
             print(f"📝 Saving product {selected_prod['product_id']} to memory to prevent duplicate posts.")
             mark_as_posted(str(selected_prod['product_id']))
         else:

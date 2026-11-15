@@ -156,3 +156,19 @@ def mark_as_posted(product_id):
             conn.commit()
     finally:
         conn.close()
+
+def get_recently_used_images(limit=100):
+    """Returns a set of image URLs that were posted in recent blog posts to avoid repetition"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT image_url FROM blog_posts 
+                WHERE image_url IS NOT NULL AND image_url != ''
+                ORDER BY created_at DESC LIMIT %s
+            """, (limit,))
+            return {row[0] for row in cur.fetchall() if row[0]}
+    except Exception:
+        return set()
+    finally:
+        conn.close()

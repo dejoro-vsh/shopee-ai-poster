@@ -144,7 +144,7 @@ def generate_trend_content(products):
         short_desc = desc[:150] + "..." if len(desc) > 150 else desc 
         
         product_summary.append(
-            f"Name: {p['item_name']} | Price: {p['price']}{sales_info}\n"
+            f"ID: {p['product_id']} | Name: {p['item_name']} | Price: {p['price']}{sales_info}\n"
             f"รายละเอียด: {short_desc}\n"
             "---"
         )
@@ -187,6 +187,7 @@ def generate_trend_content(products):
         "blog_title": "ชื่อบทความ (SEO)",
         "blog_excerpt": "คำโปรยสั้นๆ",
         "blog_content": "เนื้อหาบทความแบบ HTML",
+        "cover_product_id": "รหัส ID ของสินค้าจากรายการด้านบนที่เข้ากับเทรนด์นี้ที่สุดเพื่อนำภาพมาเป็นหน้าปก (หรือ null)",
         "caption_facebook": "แคปชั่นสำหรับเฟซบุ๊ก [LINK]",
         "caption_twitter": "แคปชั่นสำหรับทวิตเตอร์ [LINK]",
         "caption_line": "แคปชั่นสำหรับไลน์ [LINK]"
