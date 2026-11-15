@@ -104,7 +104,8 @@ class SocialPoster:
                         files = {
                             "source": ("image.jpg", img_file, "image/jpeg")
                         }
-                        response = self.session.post(photo_url, data=payload, files=files, timeout=20)
+                        # ปรับ timeout เป็น 45s สำหรับอัปโหลดไฟล์รูปภาพข้ามประเทศ
+                        response = self.session.post(photo_url, data=payload, files=files, timeout=45)
                     
                     if os.path.exists(temp_img_path):
                         os.remove(temp_img_path)
@@ -122,21 +123,37 @@ class SocialPoster:
                         except: print("  FB Error Details:", e.response.text)
                     print("  -> สลับไปใช้วิธีสำรอง: โพสต์แบบ Feed Link...")
 
-        # 2. Fallback: โพสต์เข้า Page Feed ตรงๆ (Facebook จะดึง Rich Preview Card อัตโนมัติจากเว็บบล็อก)
+        # 2. Fallback 1: โพสต์เข้า Page Feed พร้อมแนบ Link Card
+        feed_url = f"https://graph.facebook.com/v21.0/{self.fb_page_id}/feed"
+        if link:
+            try:
+                print("  -> Posting directly to Facebook Page Feed with link card (via IPv4)...")
+                payload = {
+                    "message": message,
+                    "link": link,
+                    "access_token": self.fb_access_token
+                }
+                response = self.session.post(feed_url, data=payload, timeout=30)
+                response.raise_for_status()
+                post_id = response.json().get('id')
+                print(f"  ✅ Facebook Feed Post Success! ID: {post_id}")
+                return f"Success: {post_id}"
+            except Exception as e:
+                print("  ⚠️ Facebook Feed with Link Card Error (อาจเป็นเพราะ Scraper ช้า):", e)
+                print("  -> สลับไปใช้วิธีสำรอง: โพสต์เฉพาะข้อความพร้อมลิงก์ (ไม่รอ Scraper)...")
+
+        # 3. Fallback 2: โพสต์เฉพาะข้อความ (ซึ่งมีลิงก์บทความอยู่ในตัวข้อความแล้ว)
+        # วิธีนี้ Facebook ไม่ต้องทำการ Scrape หน้าเว็บภายนอก จะตอบกลับสำเร็จทันทีใน 1-2 วินาที
         try:
-            print("  -> Posting directly to Facebook Page Feed (via IPv4)...")
-            feed_url = f"https://graph.facebook.com/v21.0/{self.fb_page_id}/feed"
+            print("  -> Posting directly to Facebook Page Feed as text (via IPv4)...")
             payload = {
                 "message": message,
                 "access_token": self.fb_access_token
             }
-            if link:
-                payload["link"] = link
-                
-            response = self.session.post(feed_url, data=payload, timeout=15)
+            response = self.session.post(feed_url, data=payload, timeout=20)
             response.raise_for_status()
             post_id = response.json().get('id')
-            print(f"  ✅ Facebook Feed Post Success! ID: {post_id}")
+            print(f"  ✅ Facebook Fast Feed Post Success! ID: {post_id}")
             return f"Success: {post_id}"
         except Exception as e:
             print("❌ Facebook Feed Post Error:", e)
@@ -171,7 +188,7 @@ class SocialPoster:
         payload = {"messages": messages}
         
         try:
-            response = self.session.post(url, headers=headers, json=payload, timeout=15)
+            response = self.session.post(url, headers=headers, json=payload, timeout=25)
             response.raise_for_status()
             print("  ✅ LINE Broadcast Success!")
             return "Success"
@@ -186,7 +203,7 @@ class SocialPoster:
                 try:
                     print("  -> Retrying LINE with text-only message...")
                     fallback_payload = {"messages": [{"type": "text", "text": message}]}
-                    res = self.session.post(url, headers=headers, json=fallback_payload, timeout=15)
+                    res = self.session.post(url, headers=headers, json=fallback_payload, timeout=25)
                     res.raise_for_status()
                     print("  ✅ LINE Text Broadcast Success!")
                     return "Success (Text only)"
