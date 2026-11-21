@@ -23,15 +23,34 @@ def main():
         
     print(f"✅ Found {len(all_products)} products.")
     
-    # Check memory for already posted products
+    # Check memory for already posted products and used images
     posted_ids = get_posted_product_ids()
-    products = [p for p in all_products if str(p['product_id']) not in posted_ids]
+    recently_used_images = get_recently_used_images(limit=100)
+    
+    # 1. Pre-filter: Only unposted products with a valid image URL that haven't been recently posted
+    fresh_products = [
+        p for p in all_products 
+        if str(p['product_id']) not in posted_ids 
+        and p.get('image_url') and p['image_url'].strip() 
+        and p['image_url'].strip() not in recently_used_images
+    ]
+    
+    # If all unposted products have recently used images, relax image filter to avoid starving
+    if not fresh_products:
+        print("⚠️ All unposted products have recently used images. Relaxing image deduplication filter.")
+        fresh_products = [
+            p for p in all_products 
+            if str(p['product_id']) not in posted_ids 
+            and p.get('image_url') and p['image_url'].strip()
+        ]
+        
+    products = fresh_products
     
     if not products:
         print("✅ All high-commission products today have already been posted. Nothing to do!")
         return
         
-    print(f"✅ Found {len(products)} unposted products.")
+    print(f"✅ Found {len(products)} valid, unposted products ready for AI.")
     
     current_hour = datetime.now().hour
     # Strategy: 
@@ -54,11 +73,26 @@ def main():
         print(f"🎯 AI Generated Trend Article: {ai_result.get('blog_title')}")
         selected_prod = None
     else:
-        print(f"🎯 AI Selected Product ID: {ai_result.get('selected_product_id')}")
+        selected_id = str(ai_result.get('selected_product_id', '')).strip()
+        print(f"🎯 AI Selected Product ID: {selected_id}")
         print(f"💡 AI Reason: {ai_result.get('reason')}")
-        selected_prod = next((p for p in products if str(p['product_id']) == str(ai_result.get('selected_product_id'))), None)
+        
+        # Match product by exact ID
+        selected_prod = next((p for p in products if str(p['product_id']) == selected_id), None)
+        
+        # If ID not found, attempt fuzzy match by item_name in AI blog_title
         if not selected_prod:
-            print("⚠️ AI selected an ID that doesn't exist. Falling back to the highest commission product.")
+            blog_title = ai_result.get('blog_title', '')
+            for p in products:
+                name_clean = p['item_name'][:20]
+                if name_clean in blog_title or p['item_name'] in blog_title:
+                    selected_prod = p
+                    print(f"🔍 Matched product by title: {p['item_name'][:40]} (ID: {p['product_id']})")
+                    break
+                    
+        # Fallback to first available fresh product if AI gave invalid ID
+        if not selected_prod:
+            print("⚠️ AI selected an ID that doesn't exist. Falling back to first available product.")
             selected_prod = products[0]
             
     print("📝 AI Captions Generated: [FB, Twitter, LINE]")
@@ -79,48 +113,28 @@ def main():
     if not final_slug:
         final_slug = fallback_slug
         
-    recently_used_images = get_recently_used_images(limit=100)
-    
     if is_knowledge_time:
         final_title = ai_result.get("blog_title")
         final_content = ai_result.get("blog_content")
         category = ai_result.get("category", "อื่นๆ")
         
-        # 1. พยายามเลือกสินค้าที่ตรงกับที่ AI แนะนำ หรือสุ่มจากสินค้าที่ยังไม่เคยใช้รูป
-        chosen_prod = None
-        cover_id = ai_result.get("cover_product_id")
-        if cover_id:
-            chosen_prod = next((p for p in products if str(p['product_id']) == str(cover_id) and p.get('image_url') and p['image_url'] not in recently_used_images), None)
-            
-        if not chosen_prod:
-            # กรองสินค้าที่รูปยังไม่เคยถูกนำไปโพสต์ใน 100 บทความล่าสุด
-            available_prods = [p for p in products if p.get('image_url') and p['image_url'] not in recently_used_images]
-            if available_prods:
-                import random
-                # สุ่มเลือกจากกลุ่ม 15 อันดับแรกที่ไม่เคยใช้รูป เพื่อกระจายภาพ ไม่ให้ค้างอยู่ที่ index 0
-                chosen_prod = random.choice(available_prods[:15])
-                
-        if chosen_prod and chosen_prod.get('image_url'):
-            trend_image = chosen_prod['image_url']
-            selected_prod = chosen_prod # ให้บันทึก mark_as_posted เพื่อไม่ให้วนกลับมาซ้ำอีก
-            print(f"🖼️ เลือกรูปภาพสินค้าปกเทรนด์ (ไม่ซ้ำ): {chosen_prod.get('item_name', '')[:40]} (ID: {chosen_prod['product_id']})")
-        else:
-            # 2. กรณีสินค้าหมด หรือรูปซ้ำทั้งหมด -> สร้าง Dynamic AI Lifestyle Banner ความละเอียดสูงตามหมวดหมู่ พร้อมสุ่ม seed ทุกรอบ
-            import random
-            import urllib.parse
-            keywords_by_category = {
-                "ไอที & แกดเจ็ต": "modern minimalist workspace tech gadgets setup",
-                "เครื่องใช้ในบ้าน": "cozy modern home interior living room appliances",
-                "สุขภาพ & ความงาม": "natural organic skincare wellness spa beauty products flatlay",
-                "กีฬา & ไลฟ์สไตล์": "active lifestyle fitness gym outdoor workout gear",
-                "อื่นๆ": "trendy modern lifestyle shopping consumer products flatlay"
-            }
-            kw = keywords_by_category.get(category, "trendy modern lifestyle shopping products")
-            seed = random.randint(10000, 999999)
-            encoded_kw = urllib.parse.quote(f"{kw}, aesthetic photography, highly detailed, 8k resolution, soft natural lighting")
-            trend_image = f"https://image.pollinations.ai/prompt/{encoded_kw}?width=1200&height=800&seed={seed}"
-            selected_prod = None
-            print(f"🎨 สร้างภาพหน้าปก AI คุณภาพสูงเฉพาะบทความเทรนด์: หมวดหมู่ {category} (Seed: {seed})")
+        # สำหรับบทความเทรนด์: ใช้ภาพ AI Lifestyle Banner ความละเอียดสูงตามหมวดหมู่เสมอ
+        # ป้องกันไม่ให้เอารูปสินค้าเฉพาะเจาะจงมาใส่เป็นปกบทความภาพรวม/เทรนด์
+        import random
+        import urllib.parse
+        keywords_by_category = {
+            "ไอที & แกดเจ็ต": "modern minimalist workspace tech gadgets setup",
+            "เครื่องใช้ในบ้าน": "cozy modern home interior living room appliances",
+            "สุขภาพ & ความงาม": "natural organic skincare wellness spa beauty products flatlay",
+            "กีฬา & ไลฟ์สไตล์": "active lifestyle fitness gym outdoor workout gear",
+            "อื่นๆ": "trendy modern lifestyle shopping consumer products flatlay"
+        }
+        kw = keywords_by_category.get(category, "trendy modern lifestyle shopping products")
+        seed = random.randint(10000, 999999)
+        encoded_kw = urllib.parse.quote(f"{kw}, aesthetic photography, highly detailed, 8k resolution, soft natural lighting")
+        trend_image = f"https://image.pollinations.ai/prompt/{encoded_kw}?width=1200&height=800&seed={seed}"
+        selected_prod = None
+        print(f"🎨 สร้างภาพหน้าปก AI คุณภาพสูงเฉพาะบทความเทรนด์: หมวดหมู่ {category} (Seed: {seed})")
         
         # Ensure we pass an empty affiliate link for trends
         blog_url = publisher.publish_single_post(
@@ -134,14 +148,7 @@ def main():
         )
         social_image = trend_image
     else:
-        # กรณีรีวิวสินค้าเดี่ยว: ตรวจสอบว่ารูปของสินค้าที่เลือกซ้ำหรือไม่
-        if selected_prod and selected_prod.get('image_url') in recently_used_images:
-            print(f"⚠️ รูปภาพของสินค้า {selected_prod['product_id']} เคยใช้ไปแล้วในบทความล่าสุด กำลังสลับไปสินค้าที่มีรูปไม่ซ้ำ...")
-            alt_prod = next((p for p in products if p.get('image_url') and p['image_url'] not in recently_used_images), None)
-            if alt_prod:
-                selected_prod = alt_prod
-                print(f"🔄 สลับไปใช้สินค้า: {selected_prod.get('item_name', '')[:40]} (ID: {selected_prod['product_id']})")
-
+        # กรณีรีวิวสินค้าเดี่ยว: ใช้รูปภาพและลิงก์ของสินค้าที่เลือก 100% ไม่มีการสลับสินค้าหลัง AI สร้างเนื้อหา
         final_title = ai_result.get("blog_title") or selected_prod['item_name']
         final_content = ai_result.get("blog_content") or f"<p>รีวิวสินค้า {selected_prod['item_name']}</p>"
         
